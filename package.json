@@ -1,0 +1,45 @@
+{
+  "name": "solenexa",
+  "version": "0.1.1",
+  "description": "Offline footwear production and labour accounts",
+  "author": "SoleNexa",
+  "private": true,
+  "main": "desktop/main.cjs",
+  "scripts": {
+    "start": "electron .",
+    "test": "node --test tests/*.test.cjs",
+    "preview": "node tools/preview.cjs",
+    "dist": "electron-builder --win nsis --x64"
+  },
+  "build": {
+    "appId": "com.solenexa.desktop",
+    "productName": "SoleNexa",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "desktop/**/*",
+      "src/**/*",
+      "solenexa-logo.png",
+      "iq-links-logo.png",
+      "package.json"
+    ],
+    "win": {
+      "target": ["nsis", "portable"],
+      "signAndEditExecutable": false,
+      "requestedExecutionLevel": "asInvoker"
+    },
+    "compression": "normal",
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true
+    }
+  },
+  "devDependencies": {
+    "electron": "^44.3.0",
+    "electron-builder": "^26.15.3",
+    "prettier": "^3.9.6"
+  }
+}
