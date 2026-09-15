@@ -188,6 +188,17 @@ class Store {
       );
     return { id, kind, target, date: dt, data };
   }
+  revision(kind, id, before, after, reason) {
+    const changes = Object.keys(after).filter((key) => JSON.stringify(before[key]) !== JSON.stringify(after[key]));
+    if (!changes.length) throw Error("Change at least one value before saving.");
+    return this.event("revision", id, today(), {
+      entity: kind,
+      changes,
+      before,
+      after,
+      reason: String(reason || "Master data updated").trim().slice(0, 500) || "Master data updated",
+    });
+  }
   balance(workerId, until = "9999-12-31") {
     let earned = 0,
       paid = 0,
@@ -235,7 +246,7 @@ class Store {
       const list = tasks.filter((a) => a.departmentId === id);
       return {
         id,
-        name: this.get("department", id).name,
+        name: po.departmentNames?.[id] || this.get("department", id).name,
         assigned: round(list.reduce((s, a) => s + a.quantity / a.factor, 0)),
         accepted: round(
           list.reduce((s, a) => s + this.received(a.id).accepted / a.factor, 0),
@@ -397,6 +408,14 @@ class Store {
       );
       return this.add("department", { name });
     }
+    if (action === "department-revise") {
+      const current = this.get("department", p.id), name = text(p.name, "Department name");
+      check(!this.all("department").some((d) => d.id !== current.id && d.name.toLowerCase() === name.toLowerCase()), "Department already exists.");
+      const next = { ...current, name };
+      this.db.prepare("UPDATE records SET data=? WHERE id=?").run(JSON.stringify(next), next.id);
+      this.revision("department", next.id, current, next, p.reason);
+      return next;
+    }
     if (action === "material") {
       const name = text(p.name, "Material name"),
         unit = text(p.unit, "Unit");
@@ -410,6 +429,14 @@ class Store {
         rate: cents(p.rate),
         reorder: num(p.reorder, "Reorder level"),
       });
+    }
+    if (action === "material-revise") {
+      const current = this.get("material", p.id), name = text(p.name, "Material name"), unit = text(p.unit, "Unit");
+      check(["kg", "yard", "pcs", "meter", "litre", "pair"].includes(unit), "Choose a supported material unit.");
+      const next = { ...current, name, unit, rate: cents(p.rate), reorder: num(p.reorder, "Reorder level") };
+      this.db.prepare("UPDATE records SET data=? WHERE id=?").run(JSON.stringify(next), next.id);
+      this.revision("material", next.id, current, next, p.reason);
+      return next;
     }
     if (action === "cost") {
       check(
@@ -460,6 +487,7 @@ class Store {
         costSnapshot: cost,
         quantity: num(p.quantity, "Pairs", 1, true),
         departments,
+        departmentNames: Object.fromEntries(departments.map((id) => [id, this.get("department", id).name])),
         date: dt(),
         due: date(p.due),
         notes: String(p.notes || "").slice(0, 1000),
@@ -483,6 +511,14 @@ class Store {
           note: "Opening advance",
         });
       return worker;
+    }
+    if (action === "worker-revise") {
+      const current = this.get("worker", p.id), basis = text(p.basis, "Payment basis");
+      check(["piece", "daily", "salary"].includes(basis), "Choose payment basis.");
+      const next = { ...current, name: text(p.name, "Worker name"), phone: String(p.phone || "").slice(0, 50), basis, rate: cents(p.rate) };
+      this.db.prepare("UPDATE records SET data=? WHERE id=?").run(JSON.stringify(next), next.id);
+      this.revision("worker", next.id, current, next, p.reason);
+      return next;
     }
     if (action === "assignment") {
       const po = this.get("po", p.poId),

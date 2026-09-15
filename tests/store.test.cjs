@@ -54,6 +54,24 @@ test("per-pair costing includes wastage, labour and overhead; PO snapshots it", 
   assert.equal(c.lines[0].amount, 5500);
   assert.equal(p.costSnapshot.total, 9000);
 });
+test("master data revisions keep historical snapshots and record a readable history", (t) => {
+  const { s, m, c, w, dep, p } = fixture(t);
+  const a = s.command("assignment", { poId: p.id, workerId: w.id, departmentId: dep.id, unit: "pair", quantity: 10, rate: 20 });
+  s.command("material-revise", { id: m.id, name: "Premium Leather", unit: "yard", rate: 150, reorder: 8, reason: "Supplier rate changed" });
+  s.command("worker-revise", { id: w.id, name: "Ali Khan", phone: "0300", basis: "piece", rate: 25, reason: "Annual rate review" });
+  s.command("department-revise", { id: dep.id, name: "Upper Stitching", reason: "Production line renamed" });
+  assert.equal(s.get("material", m.id).rate, 15000);
+  assert.equal(s.get("worker", w.id).rate, 2500);
+  assert.equal(s.get("department", dep.id).name, "Upper Stitching");
+  assert.equal(c.lines[0].rate, 10000);
+  assert.equal(p.costSnapshot.total, 9000);
+  assert.equal(s.get("assignment", a.id).rate, 2000);
+  assert.equal(s.poStats(p).departments[0].name, "Upper");
+  const history = s.events().filter((e) => e.kind === "revision");
+  assert.equal(history.length, 3);
+  assert.deepEqual(new Set(history.map((e) => e.data.reason)), new Set(["Supplier rate changed", "Annual rate review", "Production line renamed"]));
+  assert.ok(history.every((e) => e.data.before && e.data.after && e.data.changes.length));
+});
 test("assignment capacity is per department and converts pieces to pairs", (t) => {
   const { s, p, w, dep } = fixture(t);
   s.command("assignment", {

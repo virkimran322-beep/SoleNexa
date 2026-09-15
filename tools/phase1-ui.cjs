@@ -8,7 +8,7 @@ const testKeys=generateKeyPairSync('ed25519'),device='a'.repeat(64),time=Date.no
 const testLicence=signedToken({version:1,product:'SoleNexa',licenseId:'ui-test',customer:'UI Test Factory',deviceId:device,issuedAt:time,expiresAt:time+86400000,offlineUntil:time+86400000},testKeys.privateKey);
 const licenceFile=path.resolve(__dirname,'../artifacts/ui-licence-'+randomUUID()+'.json');
 app.whenReady().then(async()=>{
-const store=new Store(':memory:'),sec=new Security(store,Date.now,new LicenceManager({publicKey:testKeys.publicKey,file:licenceFile,deviceId:device}));const errors=[];store.add('worker',{name:'Test Labour Profile',basis:'piece',rate:200});
+const store=new Store(':memory:'),sec=new Security(store,Date.now,new LicenceManager({publicKey:testKeys.publicKey,file:licenceFile,deviceId:device}));const errors=[];store.add('material',{name:'Test Leather',unit:'yard',rate:10000,reorder:5});store.add('worker',{name:'Test Labour Profile',basis:'piece',rate:200});
 const win=new BrowserWindow({show:false,width:1400,height:960,webPreferences:{preload:path.resolve(__dirname,'../desktop/preload.cjs'),contextIsolation:true,nodeIntegration:false,sandbox:true,backgroundThrottling:false}});
 ipcMain.handle('sole:call',(_e,a,p)=>{try{return{ok:true,data:a==='info'?(sec.authorize(a),{dbPath:'Test only'}):sec.run(a,p)}}catch(e){return{ok:false,error:e.message}}});
 win.webContents.on('console-message',(_e,...args)=>{console.log('RENDER',...args);if(args.some(x=>typeof x==='string' && /Uncaught/.test(x)))errors.push(args.join(' '));});
@@ -30,6 +30,9 @@ try{
  await submit({companyName:'Factory UI Trial',owner:'Test Owner'});await wait(()=>document.querySelector('[name=role]'));
  await submit({username:'owner',role:'owner',password:'Testing123'});await wait(()=>document.querySelector('h1')?.textContent==='Sign in to SoleNexa');
  await submit({username:'owner',password:'Testing123'});await wait(()=>document.querySelector('#nav a'));
+ location.hash='materials';await wait(()=>document.querySelector('[data-action=material-revise]'));
+ document.querySelector('[data-action=material-revise]').click();await submit({name:'Premium Leather',unit:'yard',rate:'150',reorder:'8',reason:'Supplier rate changed'});await wait(()=>!document.querySelector('#modal').open);await wait(()=>document.querySelector('#main')?.textContent.includes('Premium Leather'));
+ document.querySelector('[data-action=material-history]').click();await wait(()=>document.querySelector('#modal[open]')?.textContent.includes('Supplier rate changed'));document.querySelector('#modal [data-action=close]').click();
  location.hash='access';await wait(()=>document.querySelector('[data-action=user-new]'));await wait(()=>document.querySelector('#access-content table'));
  document.querySelector('[data-action=user-new]').click();await submit({username:'worker1',role:'worker',password:'Testing123'});await wait(()=>!document.querySelector('#modal').open);await wait(()=>document.querySelector('#access-content')?.textContent.includes('worker1'));
  document.querySelector('[data-action=user-link]').click();

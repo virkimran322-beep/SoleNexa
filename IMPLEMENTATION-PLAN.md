@@ -2,7 +2,7 @@
 
 Status: [x] ✓ completed and checked; [ ] ✗ remaining (not complete).
 
-Current milestone: v0.1 offline pilot. Live factory rollout is not yet signed off.
+Current milestone: v0.2.3 offline pilot. Live factory rollout is not yet signed off.
 
 ## Product
 Offline Windows desktop software for a footwear factory with a Shopify store. Factory workflow: raw materials → per-pair costing → production PO → department/worker assignments → accepted output → finished stock → dispatch. Worker advances, attendance and payments feed worker ledgers.
@@ -63,7 +63,7 @@ Offline Windows desktop software for a footwear factory with a Shopify store. Fa
 - [ ] Factory acceptance on actual computer and thermal printer (requires hardware).
 
 ### 7. Next offline iteration — before routine live use
-- [ ] Master-data editing/rate revisions with change history.
+- [x] Master-data editing/rate revisions with change history.
 - [ ] Audited corrections, assignment cancellation/reallocation and transaction reversals.
 - [ ] Department-wise labour costing and estimated-versus-actual PO costing report.
 - [x] Daily, weekly and monthly factory PDF reports covering activity, staff accounts and raw-material stock.
@@ -92,6 +92,7 @@ Offline Windows desktop software for a footwear factory with a Shopify store. Fa
 - 2026-09-12: Installer rebuilt with IQ Links logo, animated splash, activation gate, first-run factory setup, owner account flow, local hashed-password login and Day/Night mode.
 - 2026-09-12: Added visible IQ Links splash motion, powered-by footer on every print document, Save PDF export and daily/weekly/monthly factory report actions.
 - 2026-09-12: Fresh preview flow verified: activation → factory name/owner/contact/address → owner account → sign in → dashboard. Wrong/empty activation is rejected. Demo data remained in preview storage only.
+- 2026-09-15: Material, worker and department revisions added with before/after history and change reasons. Existing cost, PO and assignment snapshots remain unchanged. 27 automated tests and the Electron UI regression passed.
 
 ## Phase 1 update — 2026-09-15
-See PHASE-1.md for verified changes and remaining acceptance work. Version 0.2.0 adds shared backend authorization, user administration, password migration, login lockout, session expiry and an activity register. Online licensing remains pending.
+See PHASE-1.md for verified changes and remaining acceptance work. Version 0.2.3 includes signed device licensing plus controlled master-data revisions. Public online activation, factory acceptance and printer acceptance remain pending.

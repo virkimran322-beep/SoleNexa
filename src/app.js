@@ -81,6 +81,7 @@ const select = (name, label, opts, value = "") =>
 const dates = () =>
   input("date", "Date", "date", state.today, `max="${state.today}"`);
 const note = (label = "Reference / note") => input("note", label);
+const optionalReason = () => '<label class="full">Reason for change (optional)<textarea name="reason" rows="2" placeholder="Example: supplier rate changed"></textarea></label>';
 async function call(action, payload) {
   const r = window.sole
     ? await window.sole.call(action, payload)
@@ -379,10 +380,11 @@ function materials() {
               "On hand",
               "Reorder at",
               "Status",
+              "Actions",
             ],
             items.map(
               (m) =>
-                `<tr><td><strong>${esc(m.name)}</strong></td><td>${esc(m.unit)}</td><td>${money(m.rate)}</td><td>${qty(state.stocks[m.id])} ${esc(m.unit)}</td><td>${qty(m.reorder)}</td><td>${state.stocks[m.id] <= m.reorder ? badge("Low stock", "amber") : badge("In stock", "green")}</td></tr>`,
+                `<tr><td><strong>${esc(m.name)}</strong></td><td>${esc(m.unit)}</td><td>${money(m.rate)}</td><td>${qty(state.stocks[m.id])} ${esc(m.unit)}</td><td>${qty(m.reorder)}</td><td>${state.stocks[m.id] <= m.reorder ? badge("Low stock", "amber") : badge("In stock", "green")}</td><td>${can("material-revise") ? btn("Edit", "material-revise", m.id) + btn("History", "material-history", m.id) : ""}</td></tr>`,
             ),
           )
         : empty(
@@ -540,10 +542,11 @@ function workers() {
               "Advance balance",
               "Unpaid earnings",
               "",
+              "Actions",
             ],
             filtered(state.worker).map(
               (w) =>
-                `<tr><td><strong>${esc(w.name)}</strong><small>${esc(w.phone || "No phone recorded")}</small></td><td>${badge(w.basis)}</td><td>${money(w.rate)}<small>per ${w.basis === "salary" ? "month" : w.basis === "daily" ? "day" : "assignment unit"}</small></td><td>${money(state.balances[w.id].advanceDue)}</td><td>${money(state.balances[w.id].payable)}</td><td><a href="#ledger/${w.id}">Account →</a></td></tr>`,
+                `<tr><td><strong>${esc(w.name)}</strong><small>${esc(w.phone || "No phone recorded")}</small></td><td>${badge(w.basis)}</td><td>${money(w.rate)}<small>per ${w.basis === "salary" ? "month" : w.basis === "daily" ? "day" : "assignment unit"}</small></td><td>${money(state.balances[w.id].advanceDue)}</td><td>${money(state.balances[w.id].payable)}</td><td><a href="#ledger/${w.id}">Account →</a></td><td>${can("worker-revise") ? btn("Edit", "worker-revise", w.id) + btn("History", "worker-history", w.id) : ""}</td></tr>`,
             ),
           )
         : empty(
@@ -692,7 +695,7 @@ function inventory() {
     )
   );
 }
-const securedActions=['material','cost','po','worker','assignment','receipt','stock','finished','dispatch','department','advance','attendance','salary','settlement','backup','restore'];
+const securedActions=['material','material-revise','cost','po','worker','worker-revise','assignment','receipt','stock','finished','dispatch','department','department-revise','advance','attendance','salary','settlement','backup','restore'];
 const can=a=>state?.permissions?.includes('*') || state?.permissions?.includes(a);
 function visibleRoutes(){
  const r=state?.currentUser?.role;
@@ -726,7 +729,7 @@ function settings() {
       "Factory structure, print format and local data recovery.",
     ) +
     (state.licence ? panel('IQ Links licence', '<div class="panel-body"><p><strong>'+esc(state.licence.customer || '')+'</strong></p><p>Device: <code>'+esc(state.licence.deviceId)+'</code></p><p>Expires: '+esc(new Date(state.licence.expiresAt).toLocaleDateString())+' · Offline access until: '+esc(new Date(state.licence.offlineUntil).toLocaleDateString())+'</p>'+btn('Import renewed licence','licence-renew')+'</div>') : '')+
-    `<div class="setting">${panel("Factory appearance", `<div class="panel-body"><p>IQ Links remains the software brand. Your factory logo is used for factory identity and saved locally.</p>${btn("Day mode", "theme-light")}${btn("Night mode", "theme-dark")}</div>`)}${panel("Production departments", `<div class="panel-body"><div class="checks">${state.department.map((d) => badge(d.name)).join("")}</div>${btn("+ Add department", "department")}<p class="hint">New departments can be selected on future POs. Existing POs retain their required departments.</p></div>`)}${panel(
+    `<div class="setting">${panel("Factory appearance", `<div class="panel-body"><p>IQ Links remains the software brand. Your factory logo is used for factory identity and saved locally.</p>${btn("Day mode", "theme-light")}${btn("Night mode", "theme-dark")}</div>`)}${panel("Production departments", `<div class="panel-body"><div class="checks">${state.department.map((d) => `<span class="tag-with-action">${badge(d.name)}${can("department-revise") ? btn("Edit", "department-revise", d.id) + btn("History", "department-history", d.id) : ""}</span>`).join("")}</div>${btn("+ Add department", "department")}<p class="hint">New departments can be selected on future POs. Existing POs keep their saved department names.</p></div>`)}${panel(
       "Thermal printing",
       `<div class="panel-body">${select(
         "paper",
@@ -823,6 +826,15 @@ function showForm(title, fields, onSave, submit = "Save record") {
     }
   };
 }
+function showRevisionHistory(kind, id) {
+  const record = find(kind, id), title = kind === "material" ? "Material history" : kind === "worker" ? "Worker history" : "Department history";
+  const value = (key, v) => key === "rate" ? money(v) : Array.isArray(v) ? v.join(", ") : String(v ?? "—");
+  const rows = state.events.filter((e) => e.kind === "revision" && e.target === id).toReversed();
+  const body = rows.length ? rows.map((e) => `<article class="revision"><div class="revision-head"><strong>${esc(e.date)}</strong><span>${esc(e.data.reason)}</span></div><p>${e.data.changes.map((key) => `<strong>${esc(key)}:</strong> ${esc(value(key, e.data.before[key]))} → ${esc(value(key, e.data.after[key]))}`).join("<br>")}</p></article>`).join("") : '<div class="empty"><h3>No revisions yet</h3><p>This record is still using its original values.</p></div>';
+  const dlg = $("#modal");
+  dlg.innerHTML = `<div class="dialog-head"><h2 id="dialog-title">${title}: ${esc(record.name)}</h2>${btn("Close", "close")}</div><div class="dialog-body"><p class="hint">Every saved change keeps the earlier value for review. Existing cost sheets, assignments and ledgers keep their snapshots.</p>${body}<div class="dialog-foot">${btn("Close", "close")}</div></div>`;
+  dlg.showModal();
+}
 function requireRecords(kind, msg) {
   if (!state[kind].length) throw Error(msg);
 }
@@ -863,6 +875,12 @@ function form(action, id) {
     title = "Add department";
     fields = input("name", "Department name");
   }
+  if (action === "department-revise") {
+    const d = find("department", id);
+    title = "Edit department";
+    fields = input("name", "Department name", "text", d.name) + optionalReason();
+    save = (p) => call(action, { ...p, id });
+  }
   if (action === "material") {
     title = "Add raw material";
     fields =
@@ -878,6 +896,12 @@ function form(action, id) {
       number("rate", "Cost per unit (Rs)") +
       number("reorder", "Low-stock threshold") +
       '<p class="hint full">Opening quantity is entered through Stock movement → Receive.</p>';
+  }
+  if (action === "material-revise") {
+    const m = find("material", id);
+    title = "Edit raw material";
+    fields = input("name", "Material name", "text", m.name) + select("unit", "Stock & costing unit", [["kg", "Kilogram (kg)"], ["yard", "Yard"], ["pcs", "Pieces (pcs)"], ["meter", "Meter"], ["litre", "Litre"], ["pair", "Pair"]], m.unit) + number("rate", "Cost per unit (Rs)", m.rate / 100) + number("reorder", "Low-stock threshold", m.reorder) + optionalReason() + '<p class="hint full">New cost sheets use the revised rate. Saved cost sheets and stock history remain unchanged.</p>';
+    save = (p) => call(action, { ...p, id });
   }
   if (action === "cost") {
     requireRecords(
@@ -947,6 +971,12 @@ function form(action, id) {
       number("rate", "Default rate (Rs)") +
       number("advance", "Opening advance (Rs)") +
       dates();
+  }
+  if (action === "worker-revise") {
+    const w = find("worker", id);
+    title = "Edit worker / staff";
+    fields = input("name", "Full name", "text", w.name) + input("phone", "Phone (optional)", "tel", w.phone || "", "").replace(" required", "") + select("basis", "Payment basis", [["piece", "Per piece / pair"], ["daily", "Daily wage"], ["salary", "Monthly salary"]], w.basis) + number("rate", "Default rate (Rs)", w.rate / 100) + optionalReason() + '<p class="hint full">Existing assignments and payroll entries keep their saved rates. This rate applies to future work.</p>';
+    save = (p) => call(action, { ...p, id });
   }
   if (action === "assignment") {
     requireRecords("po", "Create a production order first.");
@@ -1225,6 +1255,9 @@ document.addEventListener("click", async (e) => {
     if(action==='user-new') return showForm('Create staff login',input('username','Username')+select('role','Access role',['owner','manager','supervisor','storekeeper','accountant','worker'].map(r=>[r,r]))+input('password','Password (8+ characters)','password'),p=>call('create-user',p));
     if(action==='password-self' || action==='user-reset') return showForm(action==='password-self'?'Change your password':'Reset account password',(action==='password-self'?input('currentPassword','Current password','password'):'')+input('password','New password (8+ characters)','password'),async p=>{await call(action==='password-self'?'change-password':'reset-password',{...p,id});if(action==='password-self'){state=null;setTimeout(boot,0);}});
     if(action==='user-disable' || action==='user-enable'){await call('set-user-active',{id,active:action==='user-enable'});return loadAccess();}
+    if(action==='material-history') return showRevisionHistory('material',id);
+    if(action==='worker-history') return showRevisionHistory('worker',id);
+    if(action==='department-history') return showRevisionHistory('department',id);
     if (action === "close") return $("#modal").close();
     if (action === "add-line") {
       $("#cost-lines").insertAdjacentHTML("beforeend", costLine());

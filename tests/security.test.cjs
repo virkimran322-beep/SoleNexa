@@ -28,3 +28,19 @@ test('worker profile linking is owner-only, unique and isolates personal data',(
  sec.run('link-worker',{id:u.id,workerId:''});assert.equal(c.run('snapshot').myWork,null);
  store.close();
 });
+test('master data revisions follow manager permissions and preserve worker restrictions',()=>{
+ const {store,sec}=setup();
+ const material=store.add('material',{name:'Leather',unit:'yard',rate:10000,reorder:5});
+ const worker=store.add('worker',{name:'Ali',basis:'piece',rate:2000});
+ const department=store.all('department')[0];
+ const manager=sec.run('create-user',{username:'manager1',role:'manager',password:'Testing123'});
+ const managerClient=new Security(store);managerClient.run('login',{username:'manager1',password:'Testing123'});
+ managerClient.run('material-revise',{id:material.id,name:'Leather Plus',unit:'yard',rate:120,reorder:6,reason:'Approved change'});
+ managerClient.run('worker-revise',{id:worker.id,name:'Ali',phone:'',basis:'piece',rate:25,reason:'Approved change'});
+ managerClient.run('department-revise',{id:department.id,name:'Upper Line',reason:'Approved change'});
+ const workerUser=sec.run('create-user',{username:'worker2',role:'worker',password:'Testing123'});
+ const workerClient=new Security(store);workerClient.run('login',{username:'worker2',password:'Testing123'});
+ assert.throws(()=>workerClient.run('material-revise',{id:material.id,name:'Forbidden',unit:'yard',rate:1,reorder:1}));
+ assert.throws(()=>workerClient.run('worker-revise',{id:worker.id,name:'Forbidden',basis:'piece',rate:1}));
+ store.close();
+});

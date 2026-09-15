@@ -1,7 +1,7 @@
 # SoleNexa — factory pilot guide
 
 ## Install on Windows
-1. Copy `release/SoleNexa Setup 0.2.2.exe` to the factory computer.
+1. Copy `release/SoleNexa Setup 0.2.3.exe` to the factory computer.
 2. Run the installer, choose the location, and open the SoleNexa desktop shortcut. If Windows blocks the installer, use the portable `.exe` in the release folder; it runs without an installation step.
 3. The packaged build targets Windows 10/11 64-bit. No Node.js, development tools or internet are needed on the factory computer. Windows may identify the publisher as unknown because the pilot build is unsigned; code signing with an IQ Links certificate is required for a trusted publisher warning to disappear.
 4. Start with a small trial order and verify your printer and payment rules before entering live factory accounts.
@@ -79,3 +79,6 @@ Owner: create a worker login in Users & security, click Link labour profile and 
 
 ## Version 0.2.2: device licence
 Every computer shows its own Device ID before setup. IQ Links issues a digitally signed licence for that ID, customer and validity period. The previous shared pilot key is rejected. Settings shows the customer, device, expiry and offline access date; use Import renewed licence when IQ Links sends a renewal. Factory data remains stored if a licence expires.
+
+## Version 0.2.3: master-data revisions
+Manager can open Raw materials or Workers & staff and choose Edit. Storekeeper can revise material values and Accountant can revise worker values. Owner can also rename departments in Settings. Enter a reason when possible. New cost sheets and future assignments use the revised values; saved cost sheets, production orders, assignments and payroll entries keep their original snapshots. History shows the before and after values for each change.

@@ -1,10 +1,10 @@
 const { randomBytes, scryptSync, timingSafeEqual, createHash } = require('node:crypto');
 const roles = {
   owner: ['*'],
-  manager: ['material','cost','po','worker','assignment','receipt','stock','finished','dispatch','department'],
+  manager: ['material','material-revise','cost','po','worker','worker-revise','assignment','receipt','stock','finished','dispatch','department','department-revise'],
   supervisor: ['assignment','receipt'],
-  storekeeper: ['material','stock','finished','dispatch'],
-  accountant: ['worker','advance','attendance','salary','settlement'],
+  storekeeper: ['material','material-revise','stock','finished','dispatch'],
+  accountant: ['worker','worker-revise','advance','attendance','salary','settlement'],
   worker: [],
 };
 const aliases = {admin:'owner','sub-manager':'supervisor',production:'supervisor',inventory:'storekeeper',accounts:'accountant',viewer:'worker'};
