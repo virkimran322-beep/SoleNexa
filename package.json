@@ -1,15 +1,16 @@
 {
   "name": "solenexa",
-  "version": "0.1.1",
+  "version": "0.2.2",
   "description": "Offline footwear production and labour accounts",
-  "author": "SoleNexa",
+  "author": "IQ Links",
   "private": true,
   "main": "desktop/main.cjs",
   "scripts": {
     "start": "electron .",
     "test": "node --test tests/*.test.cjs",
     "preview": "node tools/preview.cjs",
-    "dist": "electron-builder --win nsis --x64"
+    "dist": "electron-builder --win nsis portable --x64",
+    "test:ui": "electron tools/phase1-ui.cjs"
   },
   "build": {
     "appId": "com.solenexa.desktop",
@@ -25,8 +26,10 @@
       "package.json"
     ],
     "win": {
-      "target": ["nsis", "portable"],
-      "signAndEditExecutable": false,
+      "target": [
+        "nsis",
+        "portable"
+      ],
       "requestedExecutionLevel": "asInvoker"
     },
     "compression": "normal",

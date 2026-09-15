@@ -3,11 +3,14 @@ const path = require("node:path");
 const fs = require("node:fs");
 const { pathToFileURL } = require("node:url");
 const { Store } = require("./store.cjs");
+const { Security } = require("./security.cjs");
+const { LicenceManager } = require("./licence.cjs");
+const licensingConfig = require("./licensing-config.json");
 const paperSize = (width) =>
   width === "58"
     ? { width: 58000, height: 250000 }
     : { width: 80000, height: 300000 };
-let store,
+let store, security, licence,
   win,
   currentUser = null;
 const entry = path.join(__dirname, "../src/index.html");
@@ -35,6 +38,8 @@ if (!app.requestSingleInstanceLock()) {
         "solenexa.sqlite",
       );
       store = new Store(dbPath);
+      licence = new LicenceManager({publicKey:fs.readFileSync(path.join(__dirname,'licence-public.pem'),'utf8'),file:path.join(app.getPath('userData'),'licence.json')});
+      security = new Security(store,Date.now,licence);
       session.defaultSession.setPermissionRequestHandler((_w, _p, cb) =>
         cb(false),
       );
@@ -64,28 +69,20 @@ if (!app.requestSingleInstanceLock()) {
             event.senderFrame.url.split("#")[0] !== pathToFileURL(entry).href
           )
             throw Error("Unauthorized window.");
-          if (action === "status")
-            return { ok: true, data: store.publicStatus() };
-          if (
-            [
-              "activate",
-              "setup-company",
-              "create-user",
-              "login",
-              "theme",
-            ].includes(action)
-          ) {
-            const data = store.command(action, payload);
-            if (action === "login") currentUser = data;
-            return { ok: true, data };
+          if(action==='activate-online') {
+            const endpoint=licensingConfig.activationUrl;
+            if(!endpoint || new URL(endpoint).protocol!=='https:')throw Error('Online activation is not configured. Request a signed licence from IQ Links.');
+            if(typeof payload?.code!=='string' || payload.code.length>200)throw Error('Enter an activation code.');
+            const response=await fetch(endpoint,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({code:payload.code,deviceId:licence.deviceId}),signal:AbortSignal.timeout(15000),redirect:'error'});
+            const data=await response.json();
+            if(!response.ok)throw Error(data.error || 'Activation server rejected the request.');
+            return {ok:true,data:security.run('activate',{key:data.token})};
           }
-          if (action === "snapshot") {
-            if (!currentUser) throw Error("Please sign in first.");
-            return { ok: true, data: store.snapshot() };
-          }
+          if (!["info","backup","restore","print","pdf"].includes(action)) return {ok:true,data:security.run(action,payload)};
+          security.authorize(action);
           if (action === "info")
             return { ok: true, data: { dbPath, version: app.getVersion() } };
-          if (!currentUser) throw Error("Please sign in first.");
+
           if (action === "backup") {
             const result = await dialog.showSaveDialog(win, {
               title: "Save SoleNexa backup",
@@ -129,6 +126,7 @@ if (!app.requestSingleInstanceLock()) {
               throw e;
             } finally {
               store = new Store(dbPath);
+              security = new Security(store, Date.now, licence);
             }
             return { ok: true, data: { recovery } };
           }

@@ -347,7 +347,7 @@ class Store {
           "accounts",
           "production",
           "inventory",
-          "viewer",
+          "viewer", "supervisor", "storekeeper", "accountant", "worker",
         ].includes(role),
         "Choose a valid role.",
       );

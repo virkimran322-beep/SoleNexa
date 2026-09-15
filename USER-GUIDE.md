@@ -1,19 +1,19 @@
 # SoleNexa — factory pilot guide
 
 ## Install on Windows
-1. Copy `release/SoleNexa Setup 0.1.0.exe` to the factory computer.
+1. Copy `release/SoleNexa Setup 0.2.2.exe` to the factory computer.
 2. Run the installer, choose the location, and open the SoleNexa desktop shortcut. If Windows blocks the installer, use the portable `.exe` in the release folder; it runs without an installation step.
 3. The packaged build targets Windows 10/11 64-bit. No Node.js, development tools or internet are needed on the factory computer. Windows may identify the publisher as unknown because the pilot build is unsigned; code signing with an IQ Links certificate is required for a trusted publisher warning to disappear.
 4. Start with a small trial order and verify your printer and payment rules before entering live factory accounts.
 
 ## First launch and access
 1. Every installation opens with the animated **Software powered by IQ Links** splash screen.
-2. Enter the private activation key supplied by IQ Links. The key is checked locally and is never shown in the factory database.
+2. Copy the Device ID shown on screen and send it to IQ Links. Paste the signed licence supplied for that computer. A licence copied from another computer will not work.
 3. Enter factory name, owner/responsible person, contact, address and optional factory logo. IQ Links remains the application brand; the factory logo is used for factory identity and can be used on future print documents.
 4. Create the first Owner username and password. Passwords are stored as one-way hashes.
-5. Sign in. Owner can then add staff accounts with roles such as Manager, Sub-manager, Accounts, Production, Inventory and Viewer. The role list is stored with each account for the permissions phase; the v0.1 pilot still runs as one local operator.
+5. Sign in. Owner can create Owner, Manager, Supervisor, Storekeeper, Accountant and Worker accounts. Each role only sees the screens and actions needed for its work.
 
-The activation key reduces casual copying. Because this is an offline desktop application, no client-only licensing system can make copying technically impossible. Keep the private key with IQ Links and issue it only for approved installations.
+The app verifies IQ Links' digital signature, computer identity, licence expiry and offline access date. IQ Links' private signing key stays outside the installer and GitHub repository.
 
 Use **Settings & backup → Factory appearance** to switch Day mode/Night mode. Night mode is the default. The app stores this preference locally.
 
@@ -53,7 +53,7 @@ Settings → Export database backup. Har Saturday settlement ke baad USB/externa
 Restore a backup pehle database integrity aur version check karta hai, phir explicit confirmation mangta hai. Restore se pehle current database ki `pre-restore-<timestamp>.sqlite` copy data directory mein save hoti hai. Backup single SQLite file hai. Live database ko app khuli hone par manually copy na karein; in-app Export use karein.
 
 ## Pilot boundaries / next steps
-- One local operator; no app-level roles or multi-computer access. Use Windows account permissions.
+- One local database per computer; multi-computer shared data is planned for the online phase.
 - No live Shopify sync yet. Shopify SKU can be saved as article code; dispatch reference may contain the shop order number.
 - Size/colour are PO notes, not independently counted SKU stock. Supplier payable accounts and purchase-order receiving are future modules.
 - Material/worker master rates and saved cost sheets currently have no edit/version UI. Use a new cost sheet for a revised recipe; master-data amendments and audited reversals are the next development step. Do not edit the database directly.
@@ -70,3 +70,12 @@ Run Electron's install script if the package manager has skipped its binary setu
 `electron . --smoke-test` runs the hidden development desktop check with isolated data and writes `artifacts/desktop-smoke.json`.
 
 Technical implementation references: [Electron security](https://www.electronjs.org/docs/latest/tutorial/security), [Node SQLite](https://nodejs.org/api/sqlite.html).
+
+## Version 0.2.0: user access
+Owner: open Users & security to create owner, manager, supervisor, storekeeper, accountant or worker accounts, reset passwords and disable accounts. Password button changes your own password and signs you out. Sessions expire after 15 minutes; five failed logins lock that username for five minutes. Managers manage production and materials; supervisors issue/receive work; storekeepers manage stock; accountants manage payroll. Worker accounts currently show identity only. Only owners can access the user/audit register and database backup/restore. Existing passwords upgrade automatically at login. This is still local offline activation; online device licensing is pending.
+
+## Version 0.2.1: worker portal
+Owner: create a worker login in Users & security, click Link labour profile and select an existing Workers & staff record. Each profile can link to one login. Worker login shows only personal assignments, accepted quantities, unpaid earnings, advance and account history. Change profile allows unlinking. Workers cannot post or change records.
+
+## Version 0.2.2: device licence
+Every computer shows its own Device ID before setup. IQ Links issues a digitally signed licence for that ID, customer and validity period. The previous shared pilot key is rejected. Settings shows the customer, device, expiry and offline access date; use Import renewed licence when IQ Links sends a renewal. Factory data remains stored if a licence expires.

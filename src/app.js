@@ -54,6 +54,7 @@ const labels = {
   ledger: "Labour accounts",
   inventory: "Finished inventory",
   settings: "Settings & backup",
+  access: "Users & security",
 };
 const find = (kind, id) => state[kind].find((x) => x.id === id);
 const btn = (name, action, id = "", primary = false) =>
@@ -88,7 +89,10 @@ async function call(action, payload) {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ action, payload }),
       }).then((r) => r.json());
-  if (!r.ok) throw Error(r.error);
+  if (!r.ok) {
+    if (/Session expired|Account changed|Licence required/.test(r.error)) { state=null; $('#modal')?.close(); boot(); }
+    throw Error(r.error);
+  }
   return r.data;
 }
 function hideSplash() {
@@ -98,12 +102,12 @@ function gate(title, subtitle, fields, action, submit, after) {
   hideSplash();
   $("#sidebar").style.display = "none";
   $(".shell").style.display = "block";
-  $(".shell header,.shell footer").style.display = "none";
+  document.querySelectorAll(".shell header,.shell footer").forEach(el=>el.style.display="none");
   const root = $("#main");
   root.innerHTML = `<section class="gate"><img src="../iq-links-logo.png" alt="IQ Links" class="gate-logo"><p class="eyebrow">SOFTWARE POWERED BY IQ LINKS</p><h1>${title}</h1><p class="subtitle">${subtitle}</p><form class="gate-card"><div class="error" role="alert" tabindex="-1"></div>${fields}<button class="primary" type="submit">${submit}</button><small class="gate-help">Your records stay on this computer.</small></form></section>`;
   root.querySelector("form").onsubmit = async (e) => {
     e.preventDefault();
-    const b = e.submitter;
+    const b = e.submitter || e.target.querySelector("button[type=submit]");
     b.disabled = true;
     try {
       let data = Object.fromEntries(new FormData(e.target));
@@ -120,7 +124,7 @@ function gate(title, subtitle, fields, action, submit, after) {
         delete data.companyLogoFile;
       }
       await call(action, data);
-      after();
+      await after();
     } catch (err) {
       const box = e.target.querySelector(".error");
       box.textContent = err.message;
@@ -130,7 +134,14 @@ function gate(title, subtitle, fields, action, submit, after) {
     }
   };
 }
-function activationGate() {
+function activationGate(status = {}) {
+  if(status.licence) {
+    gate("Activate SoleNexa", "Send this device ID to IQ Links to receive its signed licence.",
+      input("deviceId","Device ID","text",status.licence.deviceId,"readonly")+
+      `<p class="hint">${esc(status.licence.reason || "Activation required")}</p><label>Signed licence<textarea name="key" rows="5" required spellcheck="false" placeholder="Paste the complete licence from IQ Links"></textarea></label>`,
+      "activate","Verify licence",boot);
+    return;
+  }
   gate(
     "Activate SoleNexa",
     "Enter the private activation key supplied by IQ Links to unlock this installation.",
@@ -213,7 +224,7 @@ function loginGate(status) {
       }
       $("#sidebar").style.display = "";
       $(".shell").style.display = "";
-      $(".shell header,.shell footer").style.display = "";
+      document.querySelectorAll(".shell header,.shell footer").forEach(el=>el.style.display="");
       await refresh();
     },
   );
@@ -222,7 +233,7 @@ async function boot() {
   try {
     const s = await call("status");
     document.body.classList.toggle("light", s.theme === "light");
-    if (!s.activated) activationGate();
+    if (!s.activated) activationGate(s);
     else if (!s.setupComplete && !s.companyName) firstCompanyGate();
     else if (!s.setupComplete) ownerGate();
     else loginGate(s);
@@ -238,6 +249,7 @@ function toast(message) {
 }
 async function refresh() {
   state = await call("snapshot");
+  resetIdleTimer();
   if (!to) to = state.today;
   if (!from) {
     const d = new Date(state.today + "T12:00:00");
@@ -680,12 +692,40 @@ function inventory() {
     )
   );
 }
+const securedActions=['material','cost','po','worker','assignment','receipt','stock','finished','dispatch','department','advance','attendance','salary','settlement','backup','restore'];
+const can=a=>state?.permissions?.includes('*') || state?.permissions?.includes(a);
+function visibleRoutes(){
+ const r=state?.currentUser?.role;
+ if(r==='owner') return Object.keys(labels);
+ if(r==='manager') return ['dashboard','materials','costs','orders','production','workers','inventory'];
+ if(r==='supervisor') return ['dashboard','orders','production'];
+ if(r==='storekeeper') return ['dashboard','materials','inventory'];
+ if(r==='accountant') return ['dashboard','workers','ledger'];
+ return ['dashboard'];
+}
+function workerHome(){
+ const w=state.myWork;
+ if(!w)return heading('Welcome, '+esc(state.currentUser.username),'Ask the owner to link your login to your labour profile.')+empty('No profile linked','Your assignments and account will appear here after linking.');
+ return heading('My work · '+esc(w.name),'Your assigned work and account, read only.')+
+ '<div class="metrics">'+metric('Unpaid earnings',money(w.balance.payable),'Current balance','ledger')+metric('Advance remaining',money(w.balance.advanceDue),'Recovery recorded separately','ledger')+metric('Assignments',w.assignments.length,'All work issued to you','production')+'</div>'+
+ panel('My assignments',table(['Date / PO','Article / department','Assigned','Accepted','Rate'],w.assignments.map(a=>'<tr><td>'+esc(a.date)+'<small>'+esc(a.po)+'</small></td><td>'+esc(a.article)+'<small>'+esc(a.department)+'</small></td><td>'+qty(a.quantity)+' '+esc(a.unit)+'</td><td>'+qty(a.accepted)+'</td><td>'+(a.basis==='piece'?money(a.rate)+' / '+esc(a.unit):esc(a.basis))+'</td></tr>')))+
+ panel('My account history',table(['Date','Entry','Amount','Advance recovery'],w.entries.toReversed().map(e=>'<tr><td>'+esc(e.date)+'</td><td>'+esc(e.kind)+'</td><td>'+money(e.amount)+'</td><td>'+money(e.recovery)+'</td></tr>')));
+}
+function accessPage(){return heading('Users & security','Manage factory access and review the latest 200 security and activity events.',btn('+ Add user','user-new','',true))+panel('Access register','<div id="access-content" class="panel-body" aria-live="polite">Loading access records…</div>');}
+async function loadAccess(){
+ try {
+ const data=await call('access');
+ if(!$('#access-content')) return;
+ $('#access-content').innerHTML=table(['Username','Role','Status','Actions'],data.users.map(u=>'<tr><td>'+esc(u.username)+'</td><td>'+esc(u.role)+'</td><td>'+badge(u.active?'Active':'Disabled',u.active?'green':'')+'</td><td>'+(u.role==='worker'?btn(u.workerId?'Change profile':'Link labour profile','user-link',u.id):'')+btn('Reset password','user-reset',u.id)+(u.id!==state.currentUser.id?btn(u.active?'Disable':'Enable',u.active?'user-disable':'user-enable',u.id):'')+'</td></tr>'))+'<h3>Activity & login history</h3>'+table(['Time','User','Action','Target','Result'],data.audit.map(a=>'<tr><td>'+esc(new Date(a.at).toLocaleString())+'</td><td>'+esc(a.actor)+'</td><td>'+esc(a.action)+'</td><td>'+esc(a.target)+'</td><td>'+esc(a.outcome)+'</td></tr>'));
+ }catch(e){toast(e.message);}
+}
 function settings() {
   return (
     heading(
       "Settings & backup",
       "Factory structure, print format and local data recovery.",
     ) +
+    (state.licence ? panel('IQ Links licence', '<div class="panel-body"><p><strong>'+esc(state.licence.customer || '')+'</strong></p><p>Device: <code>'+esc(state.licence.deviceId)+'</code></p><p>Expires: '+esc(new Date(state.licence.expiresAt).toLocaleDateString())+' · Offline access until: '+esc(new Date(state.licence.offlineUntil).toLocaleDateString())+'</p>'+btn('Import renewed licence','licence-renew')+'</div>') : '')+
     `<div class="setting">${panel("Factory appearance", `<div class="panel-body"><p>IQ Links remains the software brand. Your factory logo is used for factory identity and saved locally.</p>${btn("Day mode", "theme-light")}${btn("Night mode", "theme-dark")}</div>`)}${panel("Production departments", `<div class="panel-body"><div class="checks">${state.department.map((d) => badge(d.name)).join("")}</div>${btn("+ Add department", "department")}<p class="hint">New departments can be selected on future POs. Existing POs retain their required departments.</p></div>`)}${panel(
       "Thermal printing",
       `<div class="panel-body">${select(
@@ -703,12 +743,13 @@ function settings() {
 function render() {
   const parts = location.hash.slice(1).split("/");
   route = labels[parts[0]] ? parts[0] : "dashboard";
+  if (!visibleRoutes().includes(route)) route="dashboard";
   selected = parts[1] || "";
   $("#crumb").textContent = labels[route];
   $("#date").textContent = state.today;
   const brand = $("#brand-logo");
-  if (brand) brand.src = state.config?.companyLogo || "../iq-links-logo.png";
-  $("#nav").innerHTML = Object.entries(labels)
+  if (brand) brand.src = "../iq-links-logo.png";
+  $("#nav").innerHTML = Object.entries(labels).filter(([key])=>visibleRoutes().includes(key))
     .map(
       ([key, label], i) =>
         (i === 1
@@ -736,7 +777,13 @@ function render() {
     ledger,
     inventory,
     settings,
+    access: accessPage,
   }[route]();
+  if(route==="access") loadAccess();
+  if(state.currentUser.role==="worker") $("#main").innerHTML=workerHome();
+  const account=$("#account-controls");
+  if(account) account.innerHTML=`<span>${esc(state.currentUser.username)} · ${esc(state.currentUser.role)}</span>${btn("Password","password-self")}${btn("Sign out","logout")}`;
+  document.querySelectorAll("[data-action]").forEach(el=>{ const a=el.dataset.action; if(securedActions.includes(a) && !can(a)) el.hidden=true; });
   if (route === "ledger" && ledgerData()) {
     $("[name=workerFilter]").value = ledgerData().w.id;
     $("#main").insertAdjacentHTML(
@@ -760,12 +807,12 @@ function showForm(title, fields, onSave, submit = "Save record") {
   dlg.showModal();
   dlg.querySelector("form").onsubmit = async (e) => {
     e.preventDefault();
-    const button = e.submitter;
+    const button = e.submitter || e.target.querySelector("button[type=submit]");
     button.disabled = true;
     try {
       await onSave(Object.fromEntries(new FormData(e.target)));
       dlg.close();
-      await refresh();
+      if(state) await refresh();
       toast("Record saved.");
     } catch (error) {
       const box = dlg.querySelector(".error");
@@ -1172,6 +1219,12 @@ document.addEventListener("click", async (e) => {
   const action = el.dataset.action,
     id = el.dataset.id;
   try {
+    if(action==='logout'){await call('logout');state=null;$('#modal').close();return boot();}
+    if(action==='user-link') return showForm('Link worker login',select('workerId','Labour profile',[['','Unlink profile'],...state.worker.map(w=>[w.id,w.name])]).replace(' required','')+'<p>Only this profile’s work and account will be visible to this login.</p>',p=>call('link-worker',{...p,id}));
+    if(action==='licence-renew')return showForm('Import renewed licence','<label class="full">Signed licence<textarea name="key" rows="5" required></textarea></label>',p=>call('activate',p));
+    if(action==='user-new') return showForm('Create staff login',input('username','Username')+select('role','Access role',['owner','manager','supervisor','storekeeper','accountant','worker'].map(r=>[r,r]))+input('password','Password (8+ characters)','password'),p=>call('create-user',p));
+    if(action==='password-self' || action==='user-reset') return showForm(action==='password-self'?'Change your password':'Reset account password',(action==='password-self'?input('currentPassword','Current password','password'):'')+input('password','New password (8+ characters)','password'),async p=>{await call(action==='password-self'?'change-password':'reset-password',{...p,id});if(action==='password-self'){state=null;setTimeout(boot,0);}});
+    if(action==='user-disable' || action==='user-enable'){await call('set-user-active',{id,active:action==='user-enable'});return loadAccess();}
     if (action === "close") return $("#modal").close();
     if (action === "add-line") {
       $("#cost-lines").insertAdjacentHTML("beforeend", costLine());
@@ -1268,3 +1321,7 @@ window.addEventListener("hashchange", () => {
   $("#main").focus();
 });
 boot();
+
+let idleTimer;
+function resetIdleTimer(){clearTimeout(idleTimer);if(state)idleTimer=setTimeout(async()=>{try{await call('logout');}catch{}state=null;$('#modal').close();boot();toast('Signed out after 15 minutes of inactivity.');},15*60*1000);}
+['pointerdown','keydown'].forEach(name=>document.addEventListener(name,resetIdleTimer,{passive:true}));

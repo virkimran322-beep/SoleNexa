@@ -92,3 +92,6 @@ Offline Windows desktop software for a footwear factory with a Shopify store. Fa
 - 2026-09-12: Installer rebuilt with IQ Links logo, animated splash, activation gate, first-run factory setup, owner account flow, local hashed-password login and Day/Night mode.
 - 2026-09-12: Added visible IQ Links splash motion, powered-by footer on every print document, Save PDF export and daily/weekly/monthly factory report actions.
 - 2026-09-12: Fresh preview flow verified: activation → factory name/owner/contact/address → owner account → sign in → dashboard. Wrong/empty activation is rejected. Demo data remained in preview storage only.
+
+## Phase 1 update — 2026-09-15
+See PHASE-1.md for verified changes and remaining acceptance work. Version 0.2.0 adds shared backend authorization, user administration, password migration, login lockout, session expiry and an activity register. Online licensing remains pending.

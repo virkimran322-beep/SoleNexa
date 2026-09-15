@@ -4,3 +4,8 @@ release/
 .preview-data/
 *.sqlite*
 artifacts/
+
+.licensing-private/
+*.license
+.env
+.env.*
