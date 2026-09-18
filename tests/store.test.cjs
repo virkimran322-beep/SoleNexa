@@ -261,6 +261,18 @@ test("PO material usage separates BOM plan, issues, returns, scrap and WIP", (t)
   assert.equal(line.wip, 15);
   assert.equal(s.snapshot().poMaterialUsage[p.id][0].wip, 15);
 });
+test("quality inspections require references and preserve an approval trail", (t) => {
+  const { s, m, p, w, dep } = fixture(t);
+  const assignment = s.command("assignment", { poId: p.id, workerId: w.id, departmentId: dep.id, unit: "pair", quantity: 10, rate: 20 });
+  const incoming = s.command("inspection", { stage: "incoming", materialId: m.id, quantity: 10, accepted: 8, rejected: 2, disposition: "rework", defect: "Surface marks", note: "Incoming check" });
+  assert.equal(incoming.status, "draft");
+  s.command("inspection-submit", { id: incoming.id });
+  assert.equal(s.command("inspection-approve", { id: incoming.id }).status, "approved");
+  const inProcess = s.command("inspection", { stage: "in-process", assignmentId: assignment.id, quantity: 10, accepted: 10, rejected: 0, disposition: "pass", note: "Line check" });
+  assert.equal(inProcess.referenceId, assignment.id);
+  assert.throws(() => s.command("inspection", { stage: "final", poId: p.id, quantity: 1, accepted: 0, rejected: 1, disposition: "reject" }), /defect description/);
+  assert.throws(() => s.command("inspection-approve", { id: inProcess.id }), /submitted/);
+});
 test("master data revisions keep historical snapshots and record a readable history", (t) => {
   const { s, m, c, w, dep, p } = fixture(t);
   const a = s.command("assignment", { poId: p.id, workerId: w.id, departmentId: dep.id, unit: "pair", quantity: 10, rate: 20 });

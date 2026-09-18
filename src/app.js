@@ -46,6 +46,7 @@ const icons = {
   suppliers: "M4 7h16v13H4z M8 7V5a4 4 0 0 1 8 0v2 M8 12h8",
   settings:
     "M12 8a4 4 0 1 0 0 8 4 4 0 0 0 0-8 M12 2v3 M12 19v3 M2 12h3 M19 12h3 M5 5l2 2 M17 17l2 2 M5 19l2-2 M17 7l2-2",
+  quality: "M4 4h16v16H4z M8 12l2 2 6-6",
   arrow: "M4 12h16 M14 6l6 6-6 6",
 };
 const icon = (k) =>
@@ -59,6 +60,7 @@ const labels = {
   workers: "Workers & staff",
   ledger: "Labour accounts",
   inventory: "Finished inventory",
+  quality: "Quality inspections",
   suppliers: "Suppliers & purchases",
   profile: "Company profile",
   settings: "Settings & backup",
@@ -813,7 +815,11 @@ function inventory() {
     )
   );
 }
-const securedActions=['company-profile','material','material-revise','cost','po','worker','worker-revise','assignment','receipt','stock','finished','dispatch','department','department-revise','supplier','supplier-revise','purchase','purchase-return','supplier-payment','reservation','reservation-release','transfer','stock-count','inventory-valuation','inventory-close','advance','attendance','salary','settlement','correct-event','cancel-assignment','backup','restore','delete-all-data'];
+function quality() {
+  const rows = (state.inspection || []).toReversed().map((q) => `<tr><td><strong>${esc(q.number)}</strong><small>${esc(q.date)}</small></td><td>${badge(q.stage)}</td><td>${esc(q.referenceName)}</td><td>${qty(q.quantity)}</td><td>${qty(q.accepted)}</td><td>${qty(q.rejected)}</td><td>${badge(q.disposition, q.disposition === "pass" ? "green" : q.disposition === "hold" ? "amber" : "")}</td><td>${badge(q.status, q.status === "approved" ? "green" : q.status === "submitted" ? "amber" : "")}</td><td>${q.status === "draft" && can("inspection-submit") ? btn("Submit", "inspection-submit", q.id) : q.status === "submitted" && can("inspection-approve") ? btn("Approve", "inspection-approve", q.id, true) + btn("Reject", "inspection-reject", q.id) : q.rejectionReason ? esc(q.rejectionReason) : "—"}</td></tr>`);
+  return heading("Quality inspections", "Record incoming, in-process and final checks with clear pass, rework, scrap, hold or reject dispositions.", btn("+ New inspection", "inspection", "", true)) + panel("Inspection register", `<div class="panel-body"><p class="hint">Inspections remain separate audited records. Approval confirms the quality decision without silently changing stock or worker receipts.</p>${rows.length ? table(["Inspection","Stage","Reference","Qty","Accepted","Rejected","Disposition","Status","Action"], rows) : '<p class="muted">No inspections recorded yet.</p>'}</div>`);
+}
+const securedActions=['company-profile','material','material-revise','cost','po','worker','worker-revise','assignment','receipt','stock','finished','dispatch','department','department-revise','supplier','supplier-revise','purchase','purchase-return','supplier-payment','reservation','reservation-release','transfer','stock-count','inventory-valuation','inventory-close','inspection','inspection-submit','inspection-approve','inspection-reject','advance','attendance','salary','settlement','correct-event','cancel-assignment','backup','restore','delete-all-data'];
 const can=a=>state?.permissions?.includes('*') || state?.permissions?.includes(a);
 const correctionControl = (e) => {
   if (!can("correct-event") || !["stock", "receipt", "attendance", "settlement", "purchase-return", "supplier-payment", "supplier-receive"].includes(e.kind)) return "";
@@ -826,9 +832,9 @@ function correctionRegister() {
 function visibleRoutes(){
  const r=state?.currentUser?.role;
  if(r==='owner') return Object.keys(labels);
- if(r==='manager') return ['dashboard','materials','costs','orders','production','workers','ledger','inventory','suppliers'];
- if(r==='supervisor') return ['dashboard','orders','production'];
- if(r==='storekeeper') return ['dashboard','materials','inventory','suppliers'];
+ if(r==='manager') return ['dashboard','materials','costs','orders','production','quality','workers','ledger','inventory','suppliers'];
+ if(r==='supervisor') return ['dashboard','orders','production','quality'];
+ if(r==='storekeeper') return ['dashboard','materials','inventory','quality','suppliers'];
  if(r==='accountant') return ['dashboard','workers','ledger','suppliers'];
  return ['dashboard'];
 }
@@ -924,6 +930,7 @@ function render() {
     workers,
     ledger,
     inventory,
+    quality,
     suppliers,
     profile: profilePage,
     settings,
@@ -1317,6 +1324,10 @@ function form(action, id) {
     const d = new Date(state.today + "T12:00:00"); d.setMonth(d.getMonth() - 1);
     const previous = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
     fields = input("period", "Completed period", "month", previous) + note("Close note (optional)") + '<p class="hint full">Closing prevents future inventory entries dated inside this month. Only completed months can be closed.</p>';
+  }
+  if (action === "inspection") {
+    title = "New quality inspection";
+    fields = select("stage", "Inspection stage", [["incoming", "Incoming material"], ["in-process", "In-process work"], ["final", "Final finished output"]]) + materialSelect().replace(" required", "") + select("assignmentId", "Work assignment", [["", "Not an in-process inspection"], ...state.assignment.filter((a) => !a.cancelled).map((a) => [a.id, `${find("po", a.poId)?.number || "PO"} · ${find("worker", a.workerId)?.name || "Worker"}`])]).replace(" required", "") + poSelect().replace(" required", "") + number("quantity", "Inspection quantity", 1, "0.000001", 0.000001) + number("accepted", "Accepted quantity", 0, "0.000001", 0) + number("rejected", "Rejected quantity", 0, "0.000001", 0) + select("disposition", "Disposition", [["pass", "Pass"], ["rework", "Rework"], ["scrap", "Scrap"], ["hold", "Hold"], ["reject", "Reject"]]) + input("defect", "Defect / finding", "text", "", 'maxlength="500"').replace(" required", "") + dates() + note("Inspection note (optional)").replace(" required", "") + '<p class="hint full">Choose only the reference that matches the selected stage. Rejected quantity requires a defect description.</p>';
   }
   if (action === "reservation") {
     requireRecords("material", "Add materials before creating a reservation.");
@@ -1818,6 +1829,15 @@ document.addEventListener("click", async (e) => {
       await refresh();
       toast(action === "stock-count-submit" ? "Stock count submitted for approval." : "Stock count approved and variance posted.");
       return;
+    }
+    if (["inspection-submit", "inspection-approve"].includes(action)) {
+      await call(action, { id });
+      await refresh();
+      toast(action === "inspection-submit" ? "Inspection submitted for approval." : "Inspection approved.");
+      return;
+    }
+    if (action === "inspection-reject") {
+      return showForm("Reject inspection", '<label class="full">Reason<textarea name="reason" rows="3" maxlength="500" required placeholder="Explain why this inspection must be repeated"></textarea></label>', async (p) => { await call(action, { id, reason: p.reason }); await refresh(); });
     }
     if (action === "stock-count-reject") {
       return showForm("Reject stock count", '<label class="full">Reason<textarea name="reason" rows="3" maxlength="500" required placeholder="Explain why this count must be repeated"></textarea></label>', async (p) => { await call(action, { id, reason: p.reason }); await refresh(); });

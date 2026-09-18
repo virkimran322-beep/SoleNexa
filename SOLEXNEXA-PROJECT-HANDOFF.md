@@ -79,6 +79,7 @@ Factory mein configurable departments, piece/daily/salary workers, advances, wee
 - [x] Multi-line offline stock count sheets with reviewed atomic approval and stale/duplicate-line guards.
 - [x] Offline inventory valuation with Accountant-approved weighted-average/FIFO policy, valuation report and completed-period backdate protection.
 - [x] Offline BOM suggestions, PO planned-versus-actual material usage, provisional WIP and PO-linked scrap movements.
+- [x] Offline incoming, in-process and final quality inspection register with defect/disposition validation and approval workflow.
 - [x] Purchase landed-cost foundation: discount, freight and tax allocation, historical line valuation snapshots, landed supplier payable and landed-rate returns.
 - [x] Validated database restore with pre-restore recovery copy.
 

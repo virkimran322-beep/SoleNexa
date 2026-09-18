@@ -75,6 +75,7 @@ const kinds = [
   "transfer",
   "stock-count",
   "inventory-close",
+  "inspection",
   "settings",
   "user",
 ];
@@ -925,6 +926,43 @@ class Store {
       check(lastDay < today(), "Only a completed inventory period can be closed.");
       check(!this.all("inventory-close").some((close) => close.period === period), "This inventory period is already closed.");
       return this.add("inventory-close", { period, periodEnd: lastDay, method: this.config().inventoryValuation, valuation: this.inventoryValuationReport(lastDay), closedBy: String(p.closedBy || "Accountant").slice(0, 80), closedAt: new Date().toISOString(), note: String(p.note || "").trim().slice(0, 500) });
+    }
+    if (action === "inspection") {
+      const stage = String(p.stage || "").trim();
+      check(["incoming", "in-process", "final"].includes(stage), "Choose an inspection stage.");
+      const quantity = num(p.quantity, "Inspection quantity", 0.000001), accepted = num(p.accepted, "Accepted quantity", 0), rejected = num(p.rejected, "Rejected quantity", 0);
+      check(accepted + rejected <= quantity, "Accepted and rejected quantities cannot exceed the inspection quantity.");
+      check(accepted + rejected > 0, "Enter an accepted or rejected quantity.");
+      const disposition = String(p.disposition || "").trim();
+      check(["pass", "rework", "scrap", "hold", "reject"].includes(disposition), "Choose a valid disposition.");
+      const defect = String(p.defect || "").trim().slice(0, 500);
+      check(rejected === 0 || defect, "Add a defect description for rejected quantity.");
+      let referenceId = null, referenceName = "";
+      if (stage === "incoming") { const material = this.get("material", p.materialId); check(active(material), "Choose an active material for incoming inspection."); referenceId = material.id; referenceName = material.name; }
+      if (stage === "in-process") { const assignment = this.get("assignment", p.assignmentId); referenceId = assignment.id; referenceName = `${this.get("po", assignment.poId).number} · ${this.get("worker", assignment.workerId).name}`; }
+      if (stage === "final") { const po = this.get("po", p.poId); referenceId = po.id; referenceName = `${po.number} · ${po.article}`; }
+      return this.add("inspection", { number: `QC-${String(this.all("inspection").length + 1).padStart(4, "0")}`, date: postedDate(p.date || today()), stage, referenceId, referenceName, materialId: stage === "incoming" ? referenceId : null, assignmentId: stage === "in-process" ? referenceId : null, poId: stage === "final" ? referenceId : null, quantity, accepted, rejected, disposition, defect, note: String(p.note || "").trim().slice(0, 500), status: "draft" });
+    }
+    if (action === "inspection-submit") {
+      const inspection = this.get("inspection", p.id);
+      check(inspection.status === "draft", "Only a draft inspection can be submitted.");
+      const next = { ...inspection, status: "submitted", submittedAt: new Date().toISOString() };
+      this.db.prepare("UPDATE records SET data=? WHERE id=?").run(JSON.stringify(next), next.id);
+      return next;
+    }
+    if (action === "inspection-reject") {
+      const inspection = this.get("inspection", p.id);
+      check(inspection.status === "submitted", "Only a submitted inspection can be rejected.");
+      const next = { ...inspection, status: "rejected", rejectionReason: text(p.reason, "Rejection reason"), rejectedAt: new Date().toISOString() };
+      this.db.prepare("UPDATE records SET data=? WHERE id=?").run(JSON.stringify(next), next.id);
+      return next;
+    }
+    if (action === "inspection-approve") {
+      const inspection = this.get("inspection", p.id);
+      check(inspection.status === "submitted", "Only a submitted inspection can be approved.");
+      const next = { ...inspection, status: "approved", approvedAt: new Date().toISOString(), approvedBy: String(p.approvedBy || "").slice(0, 80) };
+      this.db.prepare("UPDATE records SET data=? WHERE id=?").run(JSON.stringify(next), next.id);
+      return next;
     }
     if (action === "stock-count-submit") {
       const count = this.get("stock-count", p.id);

@@ -51,7 +51,7 @@ Exit: a clean Windows x64 device can install, activate, operate, back up, restor
 - [x] D-09 foundation: purchase landed-cost snapshots with discount, freight and tax allocation, supplier payable totals and landed-rate returns.
 - [x] D-09 offline valuation controls: accountant-approved weighted-average/FIFO policy, completed-period close guard and current inventory valuation report.
 - [x] D-10 offline BOM suggestions, planned-versus-actual consumption, provisional WIP and audited scrap movements.
-- [ ] D-11: incoming, in-process and final quality inspection with defect/disposition workflow.
+- [x] D-11 offline incoming, in-process and final quality inspections with defect, disposition and approval workflow.
 - [ ] Production board, department queues, routing and controlled work transfer.
 - [ ] D-06: normalize high-volume queries, add indexes/pagination and benchmark production-sized data.
 - [ ] D-19: universal search, saved views, guided daily queues, role dashboards and approval inbox.
