@@ -74,6 +74,7 @@ const kinds = [
   "reservation",
   "transfer",
   "stock-count",
+  "inventory-close",
   "settings",
   "user",
 ];
@@ -411,6 +412,44 @@ class Store {
         .reduce((s, e) => s + e.data.quantity, 0),
     );
   }
+  inventoryValuationReport(asOf = today(), method = this.config().inventoryValuation) {
+    const chosen = method === "fifo" ? "fifo" : "weighted-average";
+    const materials = this.all("material").map((material) => {
+      const events = this.events(material.id).filter((event) => event.kind === "stock" && event.date <= asOf);
+      let quantity = 0, value = 0;
+      const layers = [];
+      const averageRate = () => quantity > 0 ? value / quantity : Number(material.rate || 0);
+      for (const event of events) {
+        const delta = Number(event.data.quantity || 0);
+        if (delta > 0) {
+          const rate = Number.isFinite(Number(event.data.valuationRate)) ? Number(event.data.valuationRate) : averageRate();
+          if (chosen === "fifo") layers.push({ quantity: delta, rate });
+          quantity += delta; value += delta * rate;
+        } else if (delta < 0) {
+          const issueQty = -delta;
+          if (chosen === "fifo") {
+            let remaining = issueQty;
+            while (remaining > 0 && layers.length) {
+              const layer = layers[0], used = Math.min(remaining, layer.quantity);
+              layer.quantity -= used; remaining -= used;
+              value -= used * layer.rate;
+              if (layer.quantity <= 0.000001) layers.shift();
+            }
+            if (remaining > 0) value -= remaining * averageRate();
+          } else value -= issueQty * (Number.isFinite(Number(event.data.valuationRate)) ? Number(event.data.valuationRate) : averageRate());
+          quantity += delta;
+        }
+      }
+      quantity = round(quantity);
+      value = round(Math.max(0, value));
+      return { materialId: material.id, materialName: material.name, unit: material.unit, quantity, value, averageRate: quantity > 0 ? round(value / quantity) : 0 };
+    });
+    return { asOf, method: chosen, materials, totalQuantity: round(materials.reduce((sum, line) => sum + line.quantity, 0)), totalValue: Math.round(materials.reduce((sum, line) => sum + line.value, 0)) };
+  }
+  checkInventoryPeriodOpen(dateValue) {
+    const period = String(dateValue).slice(0, 7);
+    check(!this.all("inventory-close").some((close) => close.period === period), `Inventory period ${period} is closed.`);
+  }
   ensureLot(materialId, lotCode, dateValue = today()) {
     const code = String(lotCode || "").trim().slice(0, 80);
     if (!code) return null;
@@ -533,6 +572,7 @@ class Store {
       supplierBalances: Object.fromEntries(
         this.all("supplier").map((s) => [s.id, this.supplierBalance(s.id)]),
       ),
+      inventoryValuation: this.inventoryValuationReport(),
       today: today(),
       config: this.config(),
       users: this.all("user").map((u) => ({
@@ -697,6 +737,7 @@ class Store {
       return next;
     }
     if (action === "purchase") {
+      this.checkInventoryPeriodOpen(p.date || today());
       const supplier = this.get("supplier", p.supplierId);
       check(active(supplier), "Inactive suppliers cannot be used for new purchases.");
       const invoice = text(p.invoice, "Invoice / bill number");
@@ -728,12 +769,14 @@ class Store {
       return purchase;
     }
     if (action === "purchase-return") {
+      this.checkInventoryPeriodOpen(p.date || today());
       const purchase = this.get("purchase", p.purchaseId), materialId = text(p.materialId, "Material");
       const line = purchase.lines.find((x) => x.materialId === materialId);
       check(line, "This material is not on the purchase.");
       const quantity = num(p.quantity, "Return quantity", 0.000001), returned = this.events().filter((e) => e.kind === "purchase-return" && e.data.purchaseId === purchase.id && e.data.materialId === materialId).reduce((sum, e) => sum + e.data.quantity, 0);
       check(quantity <= line.quantity - returned, "Purchase return exceeds the received quantity.");
       const dtValue = dt();
+      this.checkInventoryPeriodOpen(dtValue);
       check(dtValue >= purchase.date, "Return date cannot be before the purchase date.");
       const material = this.get("material", materialId), currentStock = this.stock(material.id, "9999-12-31", line.lotCode || null);
       check(quantity <= currentStock, "Cannot return more than current stock. Issue or adjust the remaining stock first.");
@@ -766,6 +809,7 @@ class Store {
     }
     if (action === "stock-count") {
       const countDate = postedDate(p.date || today());
+      this.checkInventoryPeriodOpen(countDate);
       const rawLines = Array.isArray(p.lines) && p.lines.length ? p.lines : [{ materialId: p.materialId, binId: p.binId, lotCode: p.lotCode, counted: p.counted }];
       check(rawLines.length <= 200, "A stock count sheet cannot contain more than 200 lines.");
       const seen = new Set();
@@ -833,6 +877,7 @@ class Store {
       check(active(destination) && active(this.get("warehouse", destination.warehouseId)), "Choose an active destination bin.");
       check(source.id !== destination.id, "Source and destination bins must be different.");
       const quantity = num(p.quantity, "Transfer quantity", 0.000001), dateValue = postedDate(p.date || today());
+      this.checkInventoryPeriodOpen(dateValue);
       const lotCode = String(p.lotCode || "").trim().slice(0, 80);
       const lot = lotCode ? this.all("lot").find((item) => item.materialId === material.id && item.code.toLowerCase() === lotCode.toLowerCase()) : null;
       check(!lotCode || lot, "Choose an existing lot before transferring it.");
@@ -850,6 +895,23 @@ class Store {
       this.event("stock", material.id, dateValue, { quantity: -quantity, type: "transfer-out", binId: source.id, warehouseId: source.warehouseId, lotId: lot?.id || null, lotCode: lot?.code || null, transferId: transfer.id, note: `Transfer ${transfer.number} to ${destination.name}` });
       this.event("stock", material.id, dateValue, { quantity, type: "transfer-in", binId: destination.id, warehouseId: destination.warehouseId, lotId: lot?.id || null, lotCode: lot?.code || null, transferId: transfer.id, note: `Transfer ${transfer.number} from ${source.name}` });
       return transfer;
+    }
+    if (action === "inventory-valuation") {
+      const method = String(p.method || "").trim().toLowerCase();
+      check(["weighted-average", "fifo"].includes(method), "Choose weighted-average or FIFO valuation.");
+      const current = this.config();
+      const next = { ...current, inventoryValuation: method, inventoryValuationApprovedBy: String(p.approvedBy || "Accountant").slice(0, 80), inventoryValuationApprovedAt: new Date().toISOString() };
+      this.db.prepare("UPDATE records SET data=? WHERE id=?").run(JSON.stringify(next), next.id);
+      return next;
+    }
+    if (action === "inventory-close") {
+      const period = String(p.period || "").trim();
+      check(/^\d{4}-(0[1-9]|1[0-2])$/.test(period), "Choose a valid inventory period.");
+      check(this.config().inventoryValuation !== "unconfigured", "Choose an inventory valuation method before closing a period.");
+      const lastDay = new Date(Number(period.slice(0, 4)), Number(period.slice(5, 7)), 0).toISOString().slice(0, 10);
+      check(lastDay < today(), "Only a completed inventory period can be closed.");
+      check(!this.all("inventory-close").some((close) => close.period === period), "This inventory period is already closed.");
+      return this.add("inventory-close", { period, periodEnd: lastDay, method: this.config().inventoryValuation, valuation: this.inventoryValuationReport(lastDay), closedBy: String(p.closedBy || "Accountant").slice(0, 80), closedAt: new Date().toISOString(), note: String(p.note || "").trim().slice(0, 500) });
     }
     if (action === "stock-count-submit") {
       const count = this.get("stock-count", p.id);
@@ -1122,6 +1184,7 @@ class Store {
       const qty = num(p.quantity, "Quantity", 0.000001),
         quantity = ["issue", "adjust-down"].includes(p.type) ? -qty : qty;
       const dtValue = dt();
+      this.checkInventoryPeriodOpen(dtValue);
       const selectedReservation = p.reservationId ? this.get("reservation", p.reservationId) : null;
       const lotCode = String(p.lotCode || selectedReservation?.lotCode || "").trim().slice(0, 80);
       const lot = lotCode ? (p.type === "receive" ? this.ensureLot(material.id, lotCode, dtValue) : this.all("lot").find((item) => item.materialId === material.id && item.code.toLowerCase() === lotCode.toLowerCase())) : null;

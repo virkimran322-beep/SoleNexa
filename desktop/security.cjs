@@ -4,13 +4,13 @@ const roles = {
   manager: ['material','material-revise','cost','po','worker','worker-revise','assignment','receipt','scan-receipt','stock','finished','dispatch','department','department-revise','supplier','supplier-revise','purchase','purchase-return','supplier-payment','warehouse','bin','lot','reservation','reservation-release','transfer','stock-count','stock-count-submit','stock-count-approve','stock-count-reject','correct-event','cancel-assignment','export-csv','whatsapp-share'],
   supervisor: ['assignment','receipt','scan-receipt'],
   storekeeper: ['material','material-revise','stock','finished','dispatch','supplier','purchase','purchase-return','warehouse','bin','lot','reservation','reservation-release','transfer','stock-count','stock-count-submit','whatsapp-share'],
-  accountant: ['worker','worker-revise','advance','attendance','salary','settlement','supplier','supplier-revise','supplier-payment','export-csv','whatsapp-share'],
+  accountant: ['worker','worker-revise','advance','attendance','salary','settlement','supplier','supplier-revise','supplier-payment','inventory-valuation','inventory-close','export-csv','whatsapp-share'],
   worker: [],
 };
 const aliases = {admin:'owner','sub-manager':'supervisor',production:'supervisor',inventory:'storekeeper',accounts:'accountant',viewer:'worker'};
 const roleOf = r => aliases[r] || r;
 const safeUser = u => ({id:u.id,username:u.username,role:roleOf(u.role),active:u.active,workerId:u.workerId || null});
-const pinActions = new Set(['company-profile','material','material-revise','cost','po','worker','worker-revise','assignment','receipt','scan-receipt','stock','finished','dispatch','department','department-revise','supplier','supplier-revise','purchase','purchase-return','supplier-payment','warehouse','bin','reservation','reservation-release','stock-count','stock-count-submit','stock-count-approve','stock-count-reject','advance','attendance','salary','settlement','correct-event','cancel-assignment','backup','restore','create-user','link-worker','change-password','reset-password','set-user-active','theme','delete-all-data']);
+const pinActions = new Set(['company-profile','material','material-revise','cost','po','worker','worker-revise','assignment','receipt','scan-receipt','stock','finished','dispatch','department','department-revise','supplier','supplier-revise','purchase','purchase-return','supplier-payment','warehouse','bin','reservation','reservation-release','transfer','stock-count','stock-count-submit','stock-count-approve','stock-count-reject','inventory-valuation','inventory-close','advance','attendance','salary','settlement','correct-event','cancel-assignment','backup','restore','create-user','link-worker','change-password','reset-password','set-user-active','theme','delete-all-data']);
 function validPin(value) { return typeof value === 'string' && /^\d{6}$/.test(value); }
 function passwordHash(value) {
   if(typeof value !== 'string' || value.length < 8 || value.length > 500) throw Error('Password must be 8–500 characters.');
@@ -163,7 +163,7 @@ class Security {
         this.save(u); result=safeUser(u);
       } else {
         if(action==='create-user' && !roles[p.role]) throw Error('Choose a valid role.');
-        const payload={...p};
+        const payload={...p, approvedBy:this.session?.username || 'setup', closedBy:this.session?.username || 'setup'};
         if(action==='setup-company') { payload.pinHash=passwordHash('pin:'+p.pin); delete payload.pin; delete payload.pinConfirm; this.pinUnlocked=true; }
         delete payload.pin;
         result=this.store.execute(action,payload);
@@ -199,7 +199,8 @@ class Security {
       } : null;
       // Notes, other workers, cost sheets and factory balances never leave the backend.
       s.config={companyName:s.config.companyName,companyLogo:s.config.companyLogo,theme:'light',language:'en'};
-      for(const key of ['material','cost','po','poCosts','worker','assignment','department','events','warehouse','bin','lot','reservation','transfer','stock-count','supplier','purchase']) s[key]=[];
+      for(const key of ['material','cost','po','poCosts','worker','assignment','department','events','warehouse','bin','lot','reservation','transfer','stock-count','inventory-close','supplier','purchase']) s[key]=[];
+      delete s.inventoryValuation;
       s.balances={};s.stocks={};s.poStats={};
     }
     if(!['owner','accountant'].includes(u.role)) {

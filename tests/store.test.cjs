@@ -637,6 +637,25 @@ test("purchase landed cost allocates discount freight and tax into historical li
   const returned = s.command("purchase-return", { purchaseId: purchase.id, materialId: m.id, quantity: 2, date: today(), note: "Landed return" });
   assert.equal(returned.data.amount, 20280);
 });
+test("inventory valuation policy reports weighted average and FIFO and closes periods", (t) => {
+  const { s, m } = fixture(t);
+  s.command("inventory-valuation", { method: "weighted-average", approvedBy: "accounts" });
+  const supplier = s.command("supplier", { name: "Valuation Supplier" });
+  s.command("purchase", { supplierId: supplier.id, invoice: "VAL-1", lines: [{ materialId: m.id, quantity: 10, rate: 100 }] });
+  s.command("purchase", { supplierId: supplier.id, invoice: "VAL-2", lines: [{ materialId: m.id, quantity: 10, rate: 200 }] });
+  s.command("stock", { materialId: m.id, type: "adjust-down", quantity: 5, note: "Consumed stock" });
+  const weighted = s.inventoryValuationReport();
+  assert.equal(weighted.method, "weighted-average");
+  assert.equal(weighted.materials.find((line) => line.materialId === m.id).value, 225000);
+  s.command("inventory-valuation", { method: "fifo", approvedBy: "accounts" });
+  const fifo = s.inventoryValuationReport();
+  assert.equal(fifo.materials.find((line) => line.materialId === m.id).value, 250000);
+  const d = new Date(today() + "T12:00:00"); d.setMonth(d.getMonth() - 1);
+  const period = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+  const close = s.command("inventory-close", { period, closedBy: "accounts" });
+  assert.equal(close.period, period);
+  assert.throws(() => s.command("stock", { materialId: m.id, type: "receive", quantity: 1, date: `${period}-15`, note: "Backdated after close" }), /period .* closed/);
+});
 
 test("stock receive can post an automatic supplier payable at the material rate", (t) => {
   const { s, m } = fixture(t);

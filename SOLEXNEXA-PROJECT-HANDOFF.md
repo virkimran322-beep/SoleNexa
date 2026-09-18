@@ -77,6 +77,7 @@ Factory mein configurable departments, piece/daily/salary workers, advances, wee
 - [x] Offline stock reservations with free-stock guards and audited consume/release events.
 - [x] Offline warehouse transfers between active bins with atomic linked events, optional lot identity and reserved-stock protection.
 - [x] Multi-line offline stock count sheets with reviewed atomic approval and stale/duplicate-line guards.
+- [x] Offline inventory valuation with Accountant-approved weighted-average/FIFO policy, valuation report and completed-period backdate protection.
 - [x] Purchase landed-cost foundation: discount, freight and tax allocation, historical line valuation snapshots, landed supplier payable and landed-rate returns.
 - [x] Validated database restore with pre-restore recovery copy.
 

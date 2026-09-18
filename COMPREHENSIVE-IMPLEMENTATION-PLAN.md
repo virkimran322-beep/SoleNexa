@@ -49,7 +49,7 @@ Exit: a clean Windows x64 device can install, activate, operate, back up, restor
 - [x] D-08 warehouse transfer foundation: atomic bin-to-bin movement, lot-aware stock checks, reserved-stock guard and linked transfer events.
 - [x] D-08 multi-line stock count sheets: one reviewed sheet can cover several material/bin/lot lines and approve all audited variances atomically.
 - [x] D-09 foundation: purchase landed-cost snapshots with discount, freight and tax allocation, supplier payable totals and landed-rate returns.
-- [ ] D-09 follow-up: accountant-approved weighted-average/FIFO valuation policy, period close and valuation reports.
+- [x] D-09 offline valuation controls: accountant-approved weighted-average/FIFO policy, completed-period close guard and current inventory valuation report.
 - [ ] D-10: BOM suggestions, planned-versus-actual consumption, WIP and scrap.
 - [ ] D-11: incoming, in-process and final quality inspection with defect/disposition workflow.
 - [ ] Production board, department queues, routing and controlled work transfer.
