@@ -10,6 +10,8 @@ function today() {
 function check(ok, message) {
   if (!ok) throw new Error(message);
 }
+function active(record) { return record && record.active !== false; }
+function flag(value, fallback = true) { return value === undefined ? fallback : [true, "true", "on", "1"].includes(value); }
 function text(v, name) {
   check(
     typeof v === "string" && v.trim().length > 0 && v.length <= 500,
@@ -46,6 +48,9 @@ function postedDate(v) {
   return v;
 }
 const cents = (v) => Math.round(num(v, "Amount") * 100);
+function safeSignedMoney(v) {
+  check(Number.isSafeInteger(v) && Math.abs(v) <= Number.MAX_SAFE_INTEGER, "Calculated amount is too large. Reduce the quantity or rate.");
+}
 const round = (v) => Math.round(v * 1e6) / 1e6;
 function safeMoney(v) {
   check(
@@ -61,6 +66,8 @@ const kinds = [
   "po",
   "worker",
   "assignment",
+  "supplier",
+  "purchase",
   "settings",
   "user",
 ];
@@ -91,7 +98,7 @@ class Store {
       CREATE TABLE IF NOT EXISTS records(id TEXT PRIMARY KEY, kind TEXT NOT NULL, data TEXT NOT NULL CHECK(json_valid(data)));
       CREATE TABLE IF NOT EXISTS events(id TEXT PRIMARY KEY, kind TEXT NOT NULL, target TEXT NOT NULL REFERENCES records(id), date TEXT NOT NULL, data TEXT NOT NULL CHECK(json_valid(data)), created TEXT NOT NULL);
       CREATE INDEX IF NOT EXISTS event_target ON events(target,date);
-      CREATE UNIQUE INDEX IF NOT EXISTS attendance_once ON events(target,date) WHERE kind='attendance';
+      DROP INDEX IF EXISTS attendance_once; CREATE UNIQUE INDEX attendance_once ON events(target,date) WHERE kind='attendance' AND json_extract(data,'$.reversalOf') IS NULL AND json_extract(data,'$.correctedBy') IS NULL;
       CREATE UNIQUE INDEX IF NOT EXISTS salary_once ON events(target,json_extract(data,'$.month')) WHERE kind='salary';
       PRAGMA user_version=1;`);
     if (!this.all("department").length)
@@ -102,13 +109,22 @@ class Store {
         key: "app-config",
         activated: false,
         setupComplete: false,
-        theme: "dark",
+        theme: "light",
+        themeVersion: 2,
+        pinHash: "",
         companyName: "",
         companyLogo: "",
         contact: "",
         address: "",
         owner: "",
+        rememberedUserId: "",
+        language: "en",
       });
+    const settings = this.config();
+    if (settings && (settings.themeVersion !== 2 || settings.theme !== "light" || !["en", "ur"].includes(settings.language))) {
+      const migrated = { ...settings, theme: "light", themeVersion: settings.themeVersion || 2, language: "en" };
+      this.db.prepare("UPDATE records SET data=? WHERE id=?").run(JSON.stringify(migrated), migrated.id);
+    }
   }
   close() {
     this.db.close();
@@ -128,6 +144,7 @@ class Store {
       activated: c.activated,
       setupComplete: c.setupComplete,
       theme: c.theme,
+      language: "en",
       companyName: c.companyName,
       companyLogo: c.companyLogo,
     };
@@ -173,8 +190,8 @@ class Store {
       .map((e) => ({ ...e, data: JSON.parse(e.data) }));
   }
   event(kind, target, dt, data) {
-    if (data.amount !== undefined) safeMoney(data.amount);
-    if (data.recovery !== undefined) safeMoney(data.recovery);
+    if (data.amount !== undefined) (data.reversalOf ? safeSignedMoney : safeMoney)(data.amount);
+    if (data.recovery !== undefined) (data.reversalOf ? safeSignedMoney : safeMoney)(data.recovery);
     const id = randomUUID();
     this.db
       .prepare("INSERT INTO events VALUES(?,?,?,?,?,?)")
@@ -187,6 +204,62 @@ class Store {
         new Date().toISOString(),
       );
     return { id, kind, target, date: dt, data };
+  }
+  reverseEvent(original, correctionId, reason) {
+    check(["stock", "receipt", "attendance", "settlement", "earning", "purchase-return", "supplier-payment", "supplier-receive"].includes(original.kind), "This entry cannot be corrected.");
+    check(!original.data.reversalOf, "A correction entry cannot be corrected.");
+    check(!original.data.correctedBy, "This entry has already been corrected.");
+    const data = { ...original.data, reversalOf: original.id, correctionId, correctionReason: reason };
+    for (const key of ["quantity", "accepted", "rejected", "days", "amount", "recovery"])
+      if (data[key] !== undefined) data[key] = -data[key];
+    const reversal = this.event(original.kind, original.target, original.date, data);
+    const marked = { ...original.data, correctedBy: correctionId, correctedAt: new Date().toISOString(), correctionReason: reason };
+    this.db.prepare("UPDATE events SET data=? WHERE id=?").run(JSON.stringify(marked), original.id);
+    return reversal;
+  }
+  correctEvent(eventId, reason) {
+    const row = this.db.prepare("SELECT * FROM events WHERE id=?").get(eventId);
+    check(row, "Event was not found.");
+    const original = { ...row, data: JSON.parse(row.data) };
+    check(["stock", "receipt", "attendance", "settlement", "purchase-return", "supplier-payment", "supplier-receive"].includes(original.kind), "This entry cannot be corrected.");
+    check(!original.data.reversalOf, "A correction entry cannot be corrected.");
+    check(!original.data.correctedBy, "This entry has already been corrected.");
+    const note = text(reason, "Correction reason");
+    if(original.kind === 'stock' && original.data.purchaseId)
+      throw Error('Use the purchase return entry to correct purchased stock; invoice stock cannot be reversed independently.');
+    const correction = this.event("correction", original.target, today(), { originalEventId: original.id, originalKind: original.kind, reason: note });
+    this.reverseEvent(original, correction.id, note);
+    if (original.kind === "receipt") {
+      const earning = this.db.prepare("SELECT * FROM events WHERE kind='earning' AND json_extract(data,'$.receiptId')=?").get(original.id);
+      if (earning) this.reverseEvent({ ...earning, data: JSON.parse(earning.data) }, correction.id, note);
+    }
+    if (original.kind === "purchase-return") {
+      const stock = this.db.prepare("SELECT * FROM events WHERE kind='stock' AND json_extract(data,'$.purchaseReturnId')=?").get(original.id);
+      if (stock) this.reverseEvent({ ...stock, data: JSON.parse(stock.data) }, correction.id, note);
+    }
+    if (original.kind === "stock" && original.data.supplierReceiveId) {
+      const supplier = this.db.prepare("SELECT * FROM events WHERE kind='supplier-receive' AND id=?").get(original.data.supplierReceiveId);
+      if (supplier) this.reverseEvent({ ...supplier, data: JSON.parse(supplier.data) }, correction.id, note);
+    }
+    if (original.kind === "supplier-receive") {
+      const stock = this.db.prepare("SELECT * FROM events WHERE kind='stock' AND json_extract(data,'$.supplierReceiveId')=?").get(original.id);
+      if (stock) this.reverseEvent({ ...stock, data: JSON.parse(stock.data) }, correction.id, note);
+    }
+    this.validateCorrectionBalances();
+    return correction;
+  }
+  validateCorrectionBalances() {
+    for(const m of this.all('material')) {
+      let total=0;
+      const days=new Map();
+      for(const e of this.events(m.id).filter(e=>e.kind==='stock')) days.set(e.date,(days.get(e.date)||0)+e.data.quantity);
+      for(const amount of days.values()) {total=round(total+amount);check(total>=0,'Correction would make stock negative. Correct dependent stock movements first.');}
+    }
+    for(const w of this.all('worker')) {
+      for(const d of new Set(this.events(w.id).map(e=>e.date))) {const b=this.balance(w.id,d);check(b.payable>=0 && b.advanceDue>=0,'Correction would exceed unpaid earnings or advance balance. Correct dependent payments first.');}
+    }
+    for(const p of this.all('po')) check(this.poStats(p).ready>=0,'Correction would invalidate finished stock. Completed output is already in inventory.');
+    for(const s of this.all('supplier')) check(this.supplierBalance(s.id).payable>=0,'Correction would exceed supplier payable. Correct dependent supplier payments first.');
   }
   revision(kind, id, before, after, reason) {
     const changes = Object.keys(after).filter((key) => JSON.stringify(before[key]) !== JSON.stringify(after[key]));
@@ -229,6 +302,16 @@ class Store {
         .reduce((s, e) => s + e.data.quantity, 0),
     );
   }
+  supplierBalance(supplierId) {
+    const purchases = this.all("purchase").filter((p) => p.supplierId === supplierId);
+    const purchaseTotal = purchases.reduce((sum, p) => sum + p.total, 0);
+    const receivedTotal = this.events(supplierId).filter((e) => e.kind === "supplier-receive").reduce((sum, e) => sum + e.data.amount, 0);
+    const purchased = purchaseTotal + receivedTotal;
+    const purchaseIds = new Set(purchases.map((p) => p.id));
+    const returned = this.events().filter((e) => e.kind === "purchase-return" && purchaseIds.has(e.data.purchaseId)).reduce((sum, e) => sum + e.data.amount, 0);
+    const paid = this.events(supplierId).filter((e) => e.kind === "supplier-payment").reduce((sum, e) => sum + e.data.amount, 0);
+    return { purchased, returned, paid, payable: purchased - returned - paid };
+  }
   received(id) {
     return this.events(id)
       .filter((e) => e.kind === "receipt")
@@ -241,7 +324,7 @@ class Store {
       );
   }
   poStats(po) {
-    const tasks = this.all("assignment").filter((a) => a.poId === po.id);
+    const tasks = this.all("assignment").filter((a) => a.poId === po.id && !a.cancelled);
     const departments = po.departments.map((id) => {
       const list = tasks.filter((a) => a.departmentId === id);
       return {
@@ -260,14 +343,49 @@ class Store {
     const dispatched = es
       .filter((e) => e.kind === "dispatch")
       .reduce((s, e) => s + e.data.quantity, 0);
+    const variantStats = (po.variants || []).map((variant) => {
+      const key = `${variant.size}::${variant.color}`;
+      const finished = es.filter((e) => e.kind === "finished" && e.data.variantKey === key).reduce((sum, e) => sum + e.data.quantity, 0);
+      const dispatched = es.filter((e) => e.kind === "dispatch" && e.data.variantKey === key).reduce((sum, e) => sum + e.data.quantity, 0);
+      return { key, size: variant.size, color: variant.color, planned: variant.quantity, finished, dispatched, available: finished - dispatched };
+    });
     return {
       departments,
       finished,
       dispatched,
       available: finished - dispatched,
+      variantStats,
       ready:
         Math.floor(Math.min(...departments.map((d) => d.accepted))) - finished,
     };
+  }
+  poCosting(po) {
+    const estimatedMaterial = po.costSnapshot.lines.reduce((sum, line) => sum + line.amount, 0) * po.quantity;
+    const estimatedLabour = po.costSnapshot.labour * po.quantity;
+    const estimatedOverhead = po.costSnapshot.overhead * po.quantity;
+    const assignments = this.all("assignment").filter((a) => a.poId === po.id);
+    const pieceLabour = assignments.reduce((sum, a) => sum + this.events(a.workerId).filter((e) => e.kind === "earning" && e.data.assignmentId === a.id).reduce((n, e) => n + e.data.amount, 0), 0);
+    const end = this.events(po.id).filter((e) => ["finished", "dispatch"].includes(e.kind)).map((e) => e.date).sort().at(-1) || today();
+    const inPeriod = (e) => e.date >= po.date && e.date <= end;
+    const dailyLabour = this.all("worker").reduce((sum, w) => sum + this.events(w.id).filter((e) => e.kind === "attendance" && inPeriod(e)).reduce((n, e) => n + e.data.amount, 0), 0);
+    const salaryLabour = this.all("worker").reduce((sum, w) => sum + this.events(w.id).filter((e) => e.kind === "salary" && inPeriod(e)).reduce((n, e) => n + e.data.amount, 0), 0);
+    const actualMaterial = this.all("material").reduce((sum, material) => {
+      const rate = po.costSnapshot.lines.find((line) => line.materialId === material.id)?.rate || 0;
+      return sum + this.events(material.id).filter((e) => e.kind === "stock" && e.data.poId === po.id).reduce((n, e) => n - e.data.quantity * rate, 0);
+    }, 0);
+    // Factory-wide wages have no PO allocation. Do not charge them to every open PO.
+    const actualLabour = pieceLabour;
+    const estimatedByDepartment = Object.fromEntries((po.costSnapshot.departmentLabour || [{ departmentId: null, name: "General labour", amount: po.costSnapshot.labour }]).map((line) => [line.departmentId || "general", { name: line.name, amount: line.amount * po.quantity }]));
+    const actualByDepartment = Object.fromEntries(assignments.reduce((rows, a) => {
+      const key = a.departmentId || "general", name = po.departmentNames?.[a.departmentId] || "General labour";
+      const amount = this.events(a.workerId).filter((e) => e.kind === "earning" && e.data.assignmentId === a.id).reduce((n, e) => n + e.data.amount, 0);
+      const current = rows.find((row) => row[0] === key);
+      if (current) current[1].amount += amount; else rows.push([key, { name, amount }]);
+      return rows;
+    }, []));
+    const estimated = { material: estimatedMaterial, labour: estimatedLabour, overhead: estimatedOverhead, total: estimatedMaterial + estimatedLabour + estimatedOverhead };
+    const actual = { material: actualMaterial, labour: actualLabour, overhead: 0, total: actualMaterial + actualLabour };
+    return { estimated, actual, variance: { material: actual.material - estimated.material, labour: actual.labour - estimated.labour, overhead: actual.overhead - estimated.overhead, total: actual.total - estimated.total }, labourByDepartment: { estimated: estimatedByDepartment, actual: actualByDepartment }, labourBreakdown: { piece: pieceLabour, daily: dailyLabour, salary: salaryLabour, unallocated: dailyLabour + salaryLabour }, periodEnd: end };
   }
   snapshot() {
     return {
@@ -281,6 +399,12 @@ class Store {
       ),
       poStats: Object.fromEntries(
         this.all("po").map((p) => [p.id, this.poStats(p)]),
+      ),
+      poCosts: Object.fromEntries(
+        this.all("po").map((p) => [p.id, this.poCosting(p)]),
+      ),
+      supplierBalances: Object.fromEntries(
+        this.all("supplier").map((s) => [s.id, this.supplierBalance(s.id)]),
       ),
       today: today(),
       config: this.config(),
@@ -313,7 +437,7 @@ class Store {
       check(
         hashPassword(normalizeActivationKey(text(p.key, "Activation key"))) ===
           ACTIVATION_HASH,
-        "Activation key is incorrect. Contact IQ Links support.",
+        "Activation key is incorrect.",
       );
       const c = this.config();
       c.activated = true;
@@ -331,13 +455,36 @@ class Store {
         address: String(p.address || "").slice(0, 500),
         owner: text(p.owner, "Owner / responsible person"),
         companyLogo: String(p.companyLogo || "").slice(0, 2_000_000),
+        pinHash: String(p.pinHash || ""),
       };
       this.db
         .prepare("UPDATE records SET data=? WHERE id=?")
         .run(JSON.stringify(c), c.id);
       return c;
     }
-    if (action === "create-user") {
+    if (action === "delete-all-data") {
+      check(String(p.confirmation || "").trim() === "DELETE ALL FACTORY DATA", "Type DELETE ALL FACTORY DATA to confirm permanent deletion.");
+      const current = this.config();
+      this.db.prepare("DELETE FROM events").run();
+      this.db.prepare("DELETE FROM records").run();
+      this.db.prepare("DELETE FROM audit").run();
+      this.db.prepare("DELETE FROM login_attempts").run();
+      return this.add("settings", { key: "app-config", activated: current.activated, setupComplete: false, theme: "light", themeVersion: 2, language: current.language === "ur" ? "ur" : "en", pinHash: "", companyName: "", companyLogo: "", contact: "", address: "", owner: "", rememberedUserId: "" });
+    }
+    if (action === "company-profile") {
+      check(this.config().setupComplete, "Complete factory setup before editing the profile.");
+      const current = this.config();
+      const c = {
+        ...current,
+        companyName: text(p.companyName, "Factory name"),
+        contact: String(p.contact || "").trim().slice(0, 200),
+        address: String(p.address || "").trim().slice(0, 500),
+        owner: text(p.owner, "Owner / responsible person"),
+        companyLogo: p.removeLogo ? "" : p.companyLogo === undefined ? current.companyLogo : String(p.companyLogo).slice(0, 2_000_000),
+      };
+      this.db.prepare("UPDATE records SET data=? WHERE id=?").run(JSON.stringify(c), c.id);
+      return c;
+    }    if (action === "create-user") {
       check(
         this.config().activated,
         "Activate SoleNexa before creating users.",
@@ -391,12 +538,75 @@ class Store {
     if (action === "theme") {
       const c = {
         ...this.config(),
-        theme: p.theme === "light" ? "light" : "dark",
+        theme: "light",
       };
       this.db
         .prepare("UPDATE records SET data=? WHERE id=?")
         .run(JSON.stringify(c), c.id);
       return c;
+    }
+    if (action === "language") {
+      const c = { ...this.config(), theme: "light", language: "en" };
+      this.db.prepare("UPDATE records SET data=? WHERE id=?").run(JSON.stringify(c), c.id);
+      return c;
+    }
+    if (action === "supplier") {
+      const name = text(p.name, "Supplier name");
+      check(!this.all("supplier").some((s) => s.name.toLowerCase() === name.toLowerCase()), "Supplier already exists.");
+      return this.add("supplier", {
+        name,
+        phone: String(p.phone || "").trim().slice(0, 50),
+        address: String(p.address || "").trim().slice(0, 500),
+        notes: String(p.notes || "").trim().slice(0, 500),
+        active: true,
+      });
+    }
+    if (action === "supplier-revise") {
+      const current = this.get("supplier", p.id), name = text(p.name, "Supplier name");
+      check(!this.all("supplier").some((s) => s.id !== current.id && s.name.toLowerCase() === name.toLowerCase()), "Supplier already exists.");
+      const next = { ...current, name, phone: String(p.phone || "").trim().slice(0, 50), address: String(p.address || "").trim().slice(0, 500), notes: String(p.notes || "").trim().slice(0, 500), active: flag(p.active, active(current)) };
+      this.db.prepare("UPDATE records SET data=? WHERE id=?").run(JSON.stringify(next), next.id);
+      this.revision("supplier", next.id, current, next, p.reason);
+      return next;
+    }
+    if (action === "purchase") {
+      const supplier = this.get("supplier", p.supplierId);
+      check(active(supplier), "Inactive suppliers cannot be used for new purchases.");
+      const invoice = text(p.invoice, "Invoice / bill number");
+      check(!this.all("purchase").some((x) => x.supplierId === supplier.id && x.invoice.toLowerCase() === invoice.toLowerCase()), "This supplier invoice already exists.");
+      check(Array.isArray(p.lines) && p.lines.length > 0, "Add at least one material line.");
+      check(new Set(p.lines.map(line=>line.materialId)).size===p.lines.length,'Use one line per material on a purchase invoice.');
+      const lines = p.lines.map((line) => {
+        const material = this.get("material", line.materialId);
+        check(active(material), "Inactive materials cannot be purchased.");
+        const quantity = num(line.quantity, "Quantity", 0.000001), rate = cents(line.rate);
+        return { materialId: material.id, name: material.name, unit: material.unit, quantity, rate, amount: safeMoney(Math.round(quantity * rate)) };
+      });
+      const purchase = this.add("purchase", { number: `PUR-${String(this.all("purchase").length + 1).padStart(4, "0")}`, supplierId: supplier.id, supplierName: supplier.name, invoice, date: dt(), lines, total: safeMoney(lines.reduce((sum, line) => sum + line.amount, 0)), notes: String(p.note || "").slice(0, 500) });
+      for (const line of lines) this.event("stock", line.materialId, purchase.date, { quantity: line.quantity, type: "receive", purchaseId: purchase.id, invoice, note: `Purchase ${purchase.number} · ${invoice}` });
+      return purchase;
+    }
+    if (action === "purchase-return") {
+      const purchase = this.get("purchase", p.purchaseId), materialId = text(p.materialId, "Material");
+      const line = purchase.lines.find((x) => x.materialId === materialId);
+      check(line, "This material is not on the purchase.");
+      const quantity = num(p.quantity, "Return quantity", 0.000001), returned = this.events().filter((e) => e.kind === "purchase-return" && e.data.purchaseId === purchase.id && e.data.materialId === materialId).reduce((sum, e) => sum + e.data.quantity, 0);
+      check(quantity <= line.quantity - returned, "Purchase return exceeds the received quantity.");
+      const dtValue = dt();
+      check(dtValue >= purchase.date, "Return date cannot be before the purchase date.");
+      const material = this.get("material", materialId), currentStock = this.stock(material.id);
+      check(quantity <= currentStock, "Cannot return more than current stock. Issue or adjust the remaining stock first.");
+      const amount = safeMoney(Math.round(quantity * line.rate));
+      const returnedEvent = this.event("purchase-return", material.id, dtValue, { purchaseId: purchase.id, supplierId: purchase.supplierId, materialId: material.id, quantity, amount, note: text(p.note, "Return reason") });
+      this.event("stock", material.id, dtValue, { quantity: -quantity, type: "purchase-return", purchaseId: purchase.id, purchaseReturnId: returnedEvent.id, note: `Purchase return · ${purchase.invoice}` });
+      return returnedEvent;
+    }
+    if (action === "supplier-payment") {
+      const supplier = this.get("supplier", p.supplierId), amount = cents(p.amount);
+      check(amount > 0, "Supplier payment must be positive.");
+      const balance = this.supplierBalance(supplier.id);
+      check(amount <= balance.payable, "Supplier payment exceeds outstanding payable.");
+      return this.event("supplier-payment", supplier.id, dt(), { amount, note: text(p.note, "Payment reference") });
     }
     if (action === "department") {
       const name = text(p.name, "Department name");
@@ -406,12 +616,12 @@ class Store {
         ),
         "Department already exists.",
       );
-      return this.add("department", { name });
+      return this.add("department", { name, active: true });
     }
     if (action === "department-revise") {
       const current = this.get("department", p.id), name = text(p.name, "Department name");
       check(!this.all("department").some((d) => d.id !== current.id && d.name.toLowerCase() === name.toLowerCase()), "Department already exists.");
-      const next = { ...current, name };
+      const next = { ...current, name, active: flag(p.active, active(current)) };
       this.db.prepare("UPDATE records SET data=? WHERE id=?").run(JSON.stringify(next), next.id);
       this.revision("department", next.id, current, next, p.reason);
       return next;
@@ -428,12 +638,13 @@ class Store {
         unit,
         rate: cents(p.rate),
         reorder: num(p.reorder, "Reorder level"),
+        active: true,
       });
     }
     if (action === "material-revise") {
       const current = this.get("material", p.id), name = text(p.name, "Material name"), unit = text(p.unit, "Unit");
       check(["kg", "yard", "pcs", "meter", "litre", "pair"].includes(unit), "Choose a supported material unit.");
-      const next = { ...current, name, unit, rate: cents(p.rate), reorder: num(p.reorder, "Reorder level") };
+      const next = { ...current, name, unit, rate: cents(p.rate), reorder: num(p.reorder, "Reorder level"), active: flag(p.active, active(current)) };
       this.db.prepare("UPDATE records SET data=? WHERE id=?").run(JSON.stringify(next), next.id);
       this.revision("material", next.id, current, next, p.reason);
       return next;
@@ -447,6 +658,7 @@ class Store {
         const m = this.get("material", l.materialId),
           quantity = num(l.quantity, "Consumption", 0.000001),
           wastage = num(l.wastage, "Wastage");
+        check(active(m), "Inactive materials cannot be used in new cost sheets.");
         check(wastage <= 100, "Wastage cannot exceed 100%.");
         return {
           materialId: m.id,
@@ -458,13 +670,21 @@ class Store {
           amount: Math.round(m.rate * quantity * (1 + wastage / 100)),
         };
       });
-      const labour = cents(p.labour),
+      const departmentLabour = Array.isArray(p.departmentLabour) && p.departmentLabour.length
+        ? p.departmentLabour.map((line) => {
+            const department = this.get("department", line.departmentId);
+            check(active(department), "Inactive departments cannot be used in new cost sheets.");
+            return { departmentId: department.id, name: department.name, amount: cents(line.amount || 0) };
+          })
+        : [{ departmentId: null, name: "General labour", amount: cents(p.labour) }];
+      const labour = departmentLabour.reduce((sum, line) => sum + line.amount, 0),
         overhead = cents(p.overhead);
       return this.add("cost", {
         name: text(p.name, "Article / cost sheet name"),
         sku: text(p.sku, "Article code"),
         lines,
         labour,
+        departmentLabour,
         overhead,
         total: lines.reduce((s, l) => s + l.amount, 0) + labour + overhead,
         date: dt(),
@@ -477,20 +697,28 @@ class Store {
         "Select at least one department.",
       );
       const departments = [...new Set(p.departments)];
-      departments.forEach((id) => this.get("department", id));
+      departments.forEach((id) => { const department = this.get("department", id); check(active(department), "Inactive departments cannot be used in new production orders."); });
       check(date(p.due) >= dt(), "Due date cannot be before the PO date.");
+      const quantity = num(p.quantity, "Pairs", 1, true);
+      const variants = Array.isArray(p.variants) && p.variants.length ? p.variants.map((v) => ({ size: text(v.size, "Variant size"), color: text(v.color, "Variant colour"), quantity: num(v.quantity, "Variant pairs", 1, true) })) : [];
+      if (variants.length) {
+        const keys = variants.map((v) => `${v.size.toLowerCase()}::${v.color.toLowerCase()}`);
+        check(new Set(keys).size === keys.length, "Size and colour variants must be unique.");
+        check(variants.reduce((sum, v) => sum + v.quantity, 0) === quantity, "Variant pairs must equal the PO quantity.");
+      }
       return this.add("po", {
         number: `PO-${String(this.all("po").length + 1).padStart(4, "0")}`,
         costId: cost.id,
         article: cost.name,
         sku: cost.sku,
         costSnapshot: cost,
-        quantity: num(p.quantity, "Pairs", 1, true),
+        quantity,
         departments,
         departmentNames: Object.fromEntries(departments.map((id) => [id, this.get("department", id).name])),
         date: dt(),
         due: date(p.due),
         notes: String(p.notes || "").slice(0, 1000),
+        variants,
       });
     }
     if (action === "worker") {
@@ -503,6 +731,7 @@ class Store {
         phone: String(p.phone || "").slice(0, 50),
         basis: p.basis,
         rate: cents(p.rate),
+        active: true,
       });
       const amount = cents(p.advance || 0);
       if (amount)
@@ -515,7 +744,7 @@ class Store {
     if (action === "worker-revise") {
       const current = this.get("worker", p.id), basis = text(p.basis, "Payment basis");
       check(["piece", "daily", "salary"].includes(basis), "Choose payment basis.");
-      const next = { ...current, name: text(p.name, "Worker name"), phone: String(p.phone || "").slice(0, 50), basis, rate: cents(p.rate) };
+      const next = { ...current, name: text(p.name, "Worker name"), phone: String(p.phone || "").slice(0, 50), basis, rate: cents(p.rate), active: flag(p.active, active(current)) };
       this.db.prepare("UPDATE records SET data=? WHERE id=?").run(JSON.stringify(next), next.id);
       this.revision("worker", next.id, current, next, p.reason);
       return next;
@@ -523,6 +752,8 @@ class Store {
     if (action === "assignment") {
       const po = this.get("po", p.poId),
         worker = this.get("worker", p.workerId);
+      check(active(worker), "Inactive workers cannot receive new assignments.");
+      check(active(this.get("department", p.departmentId)), "Inactive departments cannot receive new assignments.");
       check(
         po.departments.includes(p.departmentId),
         "Department is not required by this PO.",
@@ -551,9 +782,21 @@ class Store {
         date: dt(),
       });
     }
+    if (action === "cancel-assignment") {
+      const a = this.get("assignment", text(p.id, "Assignment"));
+      check(!a.cancelled, "This assignment is already cancelled.");
+      const received = this.received(a.id);
+      check(received.accepted + received.rejected === 0, "Assignments with received work cannot be cancelled.");
+      const reason = text(p.reason, "Cancellation reason");
+      const next = { ...a, cancelled: true, cancelledAt: today(), cancellationReason: reason };
+      this.db.prepare("UPDATE records SET data=? WHERE id=?").run(JSON.stringify(next), next.id);
+      this.event("cancellation", a.id, today(), { entity: "assignment", reason });
+      return next;
+    }
     if (action === "receipt") {
       const a = this.get("assignment", p.assignmentId),
         prev = this.received(a.id);
+      check(!a.cancelled, "Cancelled assignments cannot receive work.");
       const accepted = num(p.accepted, "Accepted quantity", 0, true),
         rejected = num(p.rejected, "Rejected quantity", 0, true);
       check(accepted + rejected > 0, "Enter received quantities.");
@@ -576,8 +819,28 @@ class Store {
         });
       return receipt;
     }
+    if (action === "scan-receipt") {
+      const code = text(p.code, "QR scan");
+      const parts = code.split("|");
+      check(parts.length === 2 && parts[0] === "SNX1" && /^[0-9a-f-]{20,50}$/i.test(parts[1]), "Invalid SoleNexa work QR code.");
+      const assignment = this.get("assignment", parts[1]);
+      const received = this.received(assignment.id);
+      const outstanding = assignment.quantity - received.accepted - received.rejected;
+      check(!assignment.cancelled, "This assignment is cancelled.");
+      check(outstanding > 0, "This work assignment is already fully received.");
+      const receipt = this.event("receipt", assignment.id, dt(), { accepted: outstanding, rejected: 0, note: "Completed by QR scanner." });
+      if (assignment.basis === "piece")
+        this.event("earning", assignment.workerId, dt(), {
+          amount: Math.round(outstanding * assignment.rate),
+          assignmentId: assignment.id,
+          receiptId: receipt.id,
+          note: `${outstanding} ${assignment.unit} · ${this.get("po", assignment.poId).number} · ${this.get("department", assignment.departmentId).name}`,
+        });
+      return receipt;
+    }
     if (action === "stock") {
-      this.get("material", p.materialId);
+      const material = this.get("material", p.materialId);
+      check(active(material), "Inactive materials cannot be used in new stock movements.");
       check(
         ["receive", "issue", "return", "adjust-up", "adjust-down"].includes(
           p.type,
@@ -586,7 +849,22 @@ class Store {
       );
       const qty = num(p.quantity, "Quantity", 0.000001),
         quantity = ["issue", "adjust-down"].includes(p.type) ? -qty : qty;
+      const dtValue = dt();
       let poId = null;
+      let supplierReceiveId = null;
+      if (p.type === "receive" && p.supplierId) {
+        const supplier = this.get("supplier", p.supplierId);
+        check(active(supplier), "Inactive suppliers cannot be used for stock receipts.");
+        const amount = safeMoney(Math.round(qty * material.rate));
+        supplierReceiveId = this.event("supplier-receive", supplier.id, dtValue, {
+          supplierId: supplier.id,
+          materialId: material.id,
+          quantity: qty,
+          rate: material.rate,
+          amount,
+          note: text(p.note, "Reference / reason"),
+        }).id;
+      }
       if (["issue", "return"].includes(p.type)) {
         poId = this.get("po", p.poId).id;
       }
@@ -599,8 +877,7 @@ class Store {
           "Return exceeds the net quantity issued to this PO.",
         );
       }
-      const dtValue = dt(),
-        future = [
+      const future = [
           ...this.events(p.materialId)
             .filter((e) => e.kind === "stock")
             .map((e) => ({ date: e.date, quantity: e.data.quantity })),
@@ -618,6 +895,7 @@ class Store {
         quantity,
         type: p.type,
         poId,
+        ...(supplierReceiveId ? { supplierReceiveId } : {}),
         note: text(p.note, "Reference / reason"),
       });
     }
@@ -625,6 +903,9 @@ class Store {
       const po = this.get("po", p.poId),
         s = this.poStats(po),
         quantity = num(p.quantity, "Pairs", 1, true);
+      const variant = p.variantKey ? s.variantStats.find((v) => v.key === p.variantKey) : null;
+      check(!p.variantKey || variant, "Choose a valid size and colour variant.");
+      if (variant) check(quantity <= (action === "finished" ? variant.planned - variant.finished : variant.available), `${action === "finished" ? "Finished receipt" : "Dispatch"} exceeds this size and colour variant balance.`);
       check(dt() >= po.date, "Date cannot be before PO.");
       check(
         quantity <= (action === "finished" ? s.ready : s.available),
@@ -651,10 +932,12 @@ class Store {
       }
       return this.event(action, po.id, dt(), {
         quantity,
+        ...(variant ? { variantKey: variant.key, variantSize: variant.size, variantColor: variant.color } : {}),
         note: text(p.note, "Reference / note"),
       });
     }
     if (action === "advance") {
+      check(active(this.get("worker", p.workerId)), "Inactive workers cannot receive new advances.");
       this.get("worker", p.workerId);
       const amount = cents(p.amount);
       check(amount > 0, "Advance must be positive.");
@@ -665,10 +948,11 @@ class Store {
     }
     if (action === "attendance") {
       const w = this.get("worker", p.workerId);
+      check(active(w), "Inactive workers cannot receive new payroll entries.");
       check(w.basis === "daily", "Attendance earnings apply to daily workers.");
       check(
         !this.events(w.id).some(
-          (e) => e.kind === "attendance" && e.date === dt(),
+          (e) => e.kind === "attendance" && e.date === dt() && !e.data.correctedBy && !e.data.reversalOf,
         ),
         "Attendance already posted for this date.",
       );
@@ -683,6 +967,7 @@ class Store {
     }
     if (action === "salary") {
       const w = this.get("worker", p.workerId);
+      check(active(w), "Inactive workers cannot receive new payroll entries.");
       check(w.basis === "salary", "Select a salaried worker.");
       check(/^\d{4}-\d{2}$/.test(p.month), "Choose a salary month.");
       date(p.month + "-01");
@@ -706,6 +991,7 @@ class Store {
       });
     }
     if (action === "settlement") {
+      check(active(this.get("worker", p.workerId)), "Inactive workers cannot receive settlements.");
       this.get("worker", p.workerId);
       const d = dt(),
         b = this.balance(p.workerId, d),
@@ -735,7 +1021,28 @@ class Store {
         earnedToDate: b.earned,
       });
     }
+    if (action === "correct-event") return this.correctEvent(text(p.eventId, "Event"), p.reason);
     throw new Error("Unknown operation.");
+  }
+  exportCsv(kind) {
+    const csvCell = (value) => {
+      let textValue = String(value ?? "");
+      if (/^[=+\-@]/.test(textValue)) textValue = "'" + textValue;
+      return `"${textValue.replaceAll('"', '""')}"`;
+    };
+    const rows = {
+      materials: [["ID", "Name", "Unit", "Rate (cents)", "Reorder", "Active"], ...this.all("material").map((m) => [m.id, m.name, m.unit, m.rate, m.reorder, active(m)])],
+      workers: [["ID", "Name", "Basis", "Rate (cents)", "Active"], ...this.all("worker").map((w) => [w.id, w.name, w.basis, w.rate, active(w)])],
+      departments: [["ID", "Name", "Active"], ...this.all("department").map((d) => [d.id, d.name, active(d)])],
+      stock: [["Date", "Material ID", "Type", "Quantity", "PO ID", "Reference"], ...this.events().filter((e) => e.kind === "stock").map((e) => [e.date, e.target, e.data.type, e.data.quantity, e.data.poId, e.data.note])],
+      pos: [["PO", "Article", "SKU", "Quantity (pairs)", "Date", "Due", "Estimated total (cents)"], ...this.all("po").map((p) => [p.number, p.article, p.sku, p.quantity, p.date, p.due, p.costSnapshot.total * p.quantity])],
+      suppliers: [["ID", "Name", "Phone", "Address", "Active", "Payable (cents)"], ...this.all("supplier").map((s) => [s.id, s.name, s.phone, s.address, active(s), this.supplierBalance(s.id).payable])],
+      purchases: [["Purchase", "Supplier", "Invoice", "Date", "Material", "Quantity", "Unit", "Rate (cents)", "Line total (cents)"], ...this.all("purchase").flatMap((p) => p.lines.map((l) => [p.number, p.supplierName, p.invoice, p.date, l.name, l.quantity, l.unit, l.rate, l.amount]))],
+      "supplier-ledgers": [["Date", "Supplier ID", "Entry", "Amount (cents)", "Purchase ID", "Material ID", "Note"], ...this.events().filter((e) => ["purchase-return", "supplier-payment", "supplier-receive"].includes(e.kind)).map((e) => [e.date, e.target, e.kind, e.data.amount, e.data.purchaseId || "", e.data.materialId || "", e.data.note])],
+      ledgers: [["Date", "Worker ID", "Entry", "Amount (cents)", "Recovery (cents)", "Note"], ...this.all("worker").flatMap((w) => this.events(w.id).filter((e) => ["earning", "attendance", "salary", "advance", "settlement"].includes(e.kind)).map((e) => [e.date, w.id, e.kind, e.data.amount, e.data.recovery || 0, e.data.note]))],
+    }[kind];
+    check(rows, "Choose a supported CSV export.");
+    return rows.map((row) => row.map(csvCell).join(",")).join("\r\n") + "\r\n";
   }
   backup(destination) {
     check(

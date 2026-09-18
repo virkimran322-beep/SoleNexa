@@ -9,11 +9,13 @@
     />
     <title>SoleNexa · Factory workspace</title>
     <link rel="stylesheet" href="style.css" />
+    <script src="qrcode.js" defer></script>
     <script src="app.js" defer></script>
   </head>
-  <body>
+  <body class="light">
     <section id="splash" aria-label="IQ Links loading">
       <img src="../iq-links-logo.png" alt="IQ Links" />
+      <span class="splash-kicker">SOLENEXA · OFFLINE FACTORY ERP</span>
       <div class="splash-line"></div>
       <p>Software powered by IQ Links</p>
     </section>
@@ -28,10 +30,10 @@
           height="64"
         />
       </div>
-      <div class="workspace">
-        <span class="workspace-icon">SN</span>
-        <div>Factory workspace<small>Production & accounts</small></div>
-      </div>
+      <a class="workspace" id="workspace-profile" href="#profile" aria-label="Open company profile">
+        <span class="workspace-icon" id="workspace-logo">SN</span>
+        <span class="workspace-name" id="workspace-name">Factory workspace</span>
+      </a>
       <nav id="nav" aria-label="Main navigation"></nav>
       <div class="side-footer">
         <span class="dot"></span> Offline desktop<small

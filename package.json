@@ -23,6 +23,7 @@
       "src/**/*",
       "solenexa-logo.png",
       "iq-links-logo.png",
+      "assets/**/*",
       "package.json"
     ],
     "win": {
@@ -30,13 +31,19 @@
         "nsis",
         "portable"
       ],
-      "requestedExecutionLevel": "asInvoker"
+      "requestedExecutionLevel": "asInvoker",
+      "icon": "assets/solenexa.ico"
     },
     "compression": "normal",
     "nsis": {
       "oneClick": false,
       "perMachine": false,
       "allowToChangeInstallationDirectory": true,
+      "include": "build/installer.nsh",
+      "installerIcon": "assets/solenexa.ico",
+      "uninstallerIcon": "assets/solenexa.ico",
+      "installerSidebar": "assets/installer-sidebar.bmp",
+      "installerHeader": "assets/installer-header.bmp",
       "createDesktopShortcut": true
     }
   },
@@ -44,5 +51,8 @@
     "electron": "^44.3.0",
     "electron-builder": "^26.15.3",
     "prettier": "^3.9.6"
+  },
+  "dependencies": {
+    "qrcode-generator": "1.4.4"
   }
 }

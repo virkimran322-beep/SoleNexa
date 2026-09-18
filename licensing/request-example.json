@@ -1,7 +1,4 @@
 {
-  "customer": "Factory name",
-  "deviceId": "paste-the-64-character-device-id-from-solenexa",
-  "expiresAt": "2027-09-15T23:59:59+05:00",
-  "seats": 1,
-  "offlineDays": 365
+  "activationKey": "IQ-LINKS-OWNER-2026",
+  "validityDays": 365
 }

@@ -1,6 +1,6 @@
 # SoleNexa Project Handoff Plan
 
-Last updated: 2026-09-15  
+Last updated: 2026-09-16
 Project: SoleNexa  
 Company branding: IQ Links  
 Repository: https://github.com/virkimran322-beep/SoleNexa.git  
@@ -33,7 +33,10 @@ Factory mein configurable departments, piece/daily/salary workers, advances, wee
 - [x] Factory name, owner, contact, address and optional factory logo.
 - [x] Owner account creation and local sign-in.
 - [x] IQ Links animated splash and powered-by branding in print documents.
-- [x] Night mode and Day mode.
+- [x] Light-only branded interface; night mode removed.
+- [x] English-only interface; Urdu language support was removed after review.
+- [x] Daily, weekly and monthly reports use A4 PDF/print output, include a production-condition graph, and offer WhatsApp summary sharing from the installed desktop app.
+- [x] Assignment slips include offline QR codes; scanner completion verifies the assignment, prevents duplicate scans, posts outstanding accepted work and opens a worker acknowledgement receipt.
 - [x] Windows thermal print dialog integration for 58mm and 80mm paper.
 - [x] Print preview and Save PDF support.
 
@@ -84,19 +87,14 @@ Factory mein configurable departments, piece/daily/salary workers, advances, wee
 - [x] Worker sees only personal assignments, accepted quantities and personal account.
 - [x] Worker cannot create or change factory records.
 
-### Device licensing
+### Offline licensing
 
-- [x] Ed25519 signed licence verification.
-- [x] Licence bound to the Windows computer Device ID.
-- [x] Customer, licence ID, issue date, expiry date and offline-until claims.
-- [x] Copied, altered, wrong-product, wrong-device and expired licences rejected.
-- [x] Clock rollback protection.
-- [x] Local licence issuance database and device seat limits.
-- [x] Authenticated local licensing service implementation.
-- [x] Administrator issue, revoke and device-transfer operations.
-- [x] Public verification key included in the app.
-- [x] Private signing key and admin token excluded from GitHub and installer.
-- [x] Old shared pilot key is no longer accepted by version 0.2.2+.
+- [x] Fixed IQ Links activation key: `IQ-LINKS-OWNER-2026`.
+- [x] Validity days required on first activation and renewal.
+- [x] Activation stored locally per Windows application-data folder.
+- [x] Expiry, tamper, invalid period and clock rollback checks.
+- [x] Device ID, online service, private signing key and per-device licence issuance removed from the current offline runtime.
+- [x] Existing factory SQLite data remains separate and is preserved when activation expires.
 
 ### Phase 2 completed item
 
@@ -108,6 +106,16 @@ Factory mein configurable departments, piece/daily/salary workers, advances, wee
 - [x] Future assignments use revised worker rates.
 - [x] Manager, Storekeeper and Accountant revision permissions.
 - [x] UI edit and history dialogs.
+- [x] Offline supplier register, material purchasing, linked stock receipts, purchase returns and supplier payable ledger.
+- [x] Supplier invoice duplication, over-return, overpayment and inactive-supplier guards.
+- [x] Structured size/colour breakdown on new production POs with exact quantity validation; existing POs remain compatible.
+- [x] Independent finished-stock and dispatch balances for new size/colour PO variants; legacy PO-level stock remains compatible.
+- [x] Offline Code 39 barcode label preview for new size/colour variants using the existing print/PDF flow.
+- [x] Audited supplier return and supplier payment corrections with linked compensating reversals and balance preservation.
+- [x] Optional fast reopen flow remembers only the last active user ID; after factory PIN, password is not requested again. Explicit sign-out clears the remembered account.
+- [x] Owner-only factory profile editing for name, owner, contact, address and logo.
+- [x] Six-digit factory PIN at setup, startup unlock and protected-change confirmation.
+- [x] Owner-only permanent factory-data deletion with PIN and exact typed confirmation.
 
 ## Current release files
 
@@ -116,26 +124,37 @@ Factory mein configurable departments, piece/daily/salary workers, advances, wee
 - [x] Company metadata: IQ Links.
 - [x] Product version: 0.2.3.
 - [x] Portable and installer builds completed.
-- [ ] Windows executable still uses the default Electron icon; a proper square IQ Links `.ico` asset is still required.
+- [x] Windows executable uses the square `assets/solenexa.ico` launcher icon with IQ Links blue/navy branding.
+- [x] Assisted installer uses IQ Links/SoleNexa branded sidebar and header artwork (`assets/installer-sidebar.bmp`, `assets/installer-header.bmp`).
 - [ ] Code-signing certificate is still required to remove the Windows Unknown Publisher warning.
 
 ## Verification completed
 
-- [x] 27 automated Node tests pass.
+- [x] 53 automated Node tests pass, including a full supplier-to-payroll factory trial, automatic supplier payable and correction dependency guards.
 - [x] Licensing alteration, copied-device, expiry, seat-limit and clock-rollback tests pass.
 - [x] Security, role, password, lockout, session and worker-isolation tests pass.
 - [x] Costing, assignment, receipt, inventory, stock and payroll tests pass.
 - [x] Master-data revision and historical-snapshot tests pass.
-- [x] Electron UI activation test passes with signed licence.
+- [x] Automated offline factory trial covers material receipt, PO issue, assignment, accepted/rejected receipt, finished stock, dispatch and settlement.
+- [x] Audited stock, receipt, attendance, settlement correction and assignment cancellation tests pass.
+- [x] Electron correction dialog, responsive and packaged release checks after Phase 2A changes.
+- [x] Electron UI activation test passes with offline activation key and validity confirmation.
 - [x] Electron UI setup, owner login and worker login pass.
 - [x] Electron UI material edit and revision history dialog pass.
+- [x] Reference-inspired light-first ERP dashboard UI, responsive cards, sidebar, tables and forms pass UI regression.
+- [x] Dashboard “Open production” and “Create production order” shortcuts route correctly and show themed prerequisite errors.
+- [x] Offline Phase 1 dashboard usability polish adds context-aware Quick Actions, a local-data safety card and 44px compact action targets without adding online dependencies.
+- [x] Detailed browser QA verified fresh setup/activation, PIN recovery, fake material/stock/worker/costing/PO/assignment data, all main module routes and forms, dashboard shortcuts, profile editor, theme controls, report preview, CSV export, search empty states and revision history; fixed shared selection, costing-total, PO-detail rendering, Security-layer CSV dispatch, payload-less PIN retry, compact button hit-area, empty supplier-dialog and unfiltered purchase-return material issues found during live preview testing.
+- [x] 2026-09-18 full-flow audit verified supplier invoice/payment, raw stock receive/issue, costing, PO, assignment, accepted/rejected/reworked output, piece/daily/salary earnings, advance recovery, finished stock, dispatch, filtered A4 report and role isolation on a separate QA database.
+- [x] Full-flow fixes cover backup/restore PIN forwarding, false PIN-failure counting, PIN lock after idle expiry, PIN-hash response privacy, correction dependency guards, QR completion-slip scope, logo normalization, previous-month salary default, report filters and PO labour double-counting.
+- [x] Browser-tested Stock movement → Receive stock with a Supplier selected: automatic quantity × current material rate payable preview and supplier ledger posting verified; linked correction reverses both stock and supplier payable.
 - [x] Unauthorized worker escalation is rejected.
 - [x] Renderer has no Node.js exposure.
 - [x] Activation controls have visible labels, keyboard error focus and 44px action target.
 - [x] 1400px and 800px desktop overflow checks pass.
 - [x] Packaged application startup smoke test passes.
 - [x] Installer and portable metadata report IQ Links and version 0.2.3.
-- [x] Package contains public licence verifier only; no private signing credentials.
+- [x] Package contains the offline activation verifier only; no private signing credentials.
 - [ ] Clean physical factory laptop installation acceptance.
 - [ ] Physical 58mm/80mm thermal printer acceptance.
 - [ ] Real factory data trial and owner sign-off.
@@ -144,11 +163,11 @@ Factory mein configurable departments, piece/daily/salary workers, advances, wee
 
 ### Phase 2A — audited corrections and production controls
 
-- [ ] Add audited correction records for wrong stock, receipt, attendance and settlement entries.
-- [ ] Add cancellation/reversal instead of deleting posted records.
-- [ ] Add assignment cancellation and safe reallocation for unfinished work.
-- [ ] Require a reason and owner/manager authorization for financial corrections.
-- [ ] Add correction history to reports and audit register.
+- [x] Add audited correction records for wrong stock, receipt, attendance and settlement entries.
+- [x] Add cancellation/reversal instead of deleting posted records.
+- [x] Add assignment cancellation and safe reallocation for unfinished work.
+- [x] Require a reason and owner/manager authorization for financial corrections.
+- [x] Add correction history to reports and audit register.
 
 How to implement:
 
@@ -161,33 +180,33 @@ How to implement:
 
 ### Phase 2B — costing and management visibility
 
-- [ ] Add department-wise labour costing to cost sheets.
-- [ ] Add estimated-versus-actual PO costing report.
-- [ ] Show material, labour, overhead and variance separately.
-- [ ] Add production completion and rejection summaries.
-- [ ] Add dashboard alerts for overdue POs, low stock and unpaid labour.
+- [x] Add department-wise labour costing to cost sheets.
+- [x] Add estimated-versus-actual PO costing report.
+- [x] Show material, labour, overhead and variance separately.
+- [x] Add production completion and rejection summaries.
+- [x] Add dashboard alerts for overdue POs, low stock and unpaid labour.
 
 How to implement:
 
 1. Preserve existing cost-sheet totals for old POs.
 2. Store department estimates as snapshots when a PO is created.
-3. Calculate actual labour from accepted output, attendance and salary entries.
+3. Calculate PO actual labour from accepted piece output. Show daily and salary wages as factory-wide unallocated labour until an explicit PO allocation policy exists.
 4. Show estimated, actual and variance values in PDF and dashboard views.
 5. Test zero-output, partial-output, rejected-output and mixed worker-basis cases.
 
 ### Phase 2C — master data and exports
 
-- [ ] Add active/inactive status for materials, workers and departments.
-- [ ] Prevent inactive records from being selected in new transactions.
-- [ ] Add CSV export for materials, workers, stock, POs and ledgers.
-- [ ] Add pagination for large history tables.
-- [ ] Add report filters for department, worker, PO and date range.
+- [x] Add active/inactive status for materials, workers and departments.
+- [x] Prevent inactive records from being selected in new transactions.
+- [x] Add CSV export for materials, workers, stock, POs and ledgers.
+- [x] Add pagination for large history tables.
+- [x] Add report filters for department, worker, PO and date range.
 - [ ] Add native backup/restore file-dialog acceptance on a physical computer.
 
 ### Phase 3 — factory readiness
 
 - [ ] Test installation on a second physical Windows 10/11 x64 laptop.
-- [ ] Test activation with a licence issued for that laptop's Device ID.
+- [ ] Test first activation with the fixed key and validity days on that laptop.
 - [ ] Test licence renewal and expired-licence behavior without losing data.
 - [ ] Test thermal printer output, paper width, margins and cutter behavior.
 - [ ] Run a real small production order from material receipt to dispatch.
@@ -226,7 +245,7 @@ How to implement:
 
 - `desktop/store.cjs` — SQLite schema, business rules and transaction actions.
 - `desktop/security.cjs` — authentication, roles, session rules and authorization.
-- `desktop/licence.cjs` — signed device licence verification.
+- `desktop/licence.cjs` — fixed-key local activation, validity and clock-rollback verification.
 - `desktop/licence-public.pem` — public verification key; safe to commit.
 - `licensing/issuer.cjs` — licence issuer database and signed-token generation.
 - `licensing/server.cjs` — local authenticated licensing service.
@@ -239,6 +258,7 @@ How to implement:
 - `IMPLEMENTATION-PLAN.md` — overall checklist.
 - `PHASE-1.md` — access/security/UI phase checklist.
 - `LICENSING-PLAN.md` — licensing deployment checklist.
+- `TECHNICAL-AUDIT.md` — Windows, installer, storage, security and deployment audit report.
 
 ## Required testing after every change
 
@@ -261,29 +281,27 @@ For a release build:
 node node_modules/electron-builder/out/cli/cli.js --win nsis portable --x64
 ```
 
-After building, verify the installer and portable files have the expected version, IQ Links metadata, working startup, public licence verifier and no private credentials. Do not commit `.licensing-private`, activation databases, `.license` files, SQLite data, `release` output or test artifacts.
+After building, verify the installer and portable files have the expected version, IQ Links metadata, working startup, offline activation verifier and no private credentials. Do not commit `.licensing-private`, activation databases, `.license` files, SQLite data, `release` output or test artifacts.
 
 ## Licence issuance workflow
 
-1. Customer installs the app and copies the Device ID shown on the activation screen.
-2. IQ Links prepares a request using `licensing/request-example.json`.
-3. On the secure IQ Links computer, issue the licence with the local administrator tool.
-4. Send the generated signed `.license` text to the customer.
-5. Customer pastes it into SoleNexa activation.
-6. For another computer, issue a licence for that computer's own Device ID.
+1. Customer installs the app on the factory computer.
+2. Enter `IQ-LINKS-OWNER-2026` and the package validity days (1–3660).
+3. Complete the factory setup and owner account.
+4. On a new computer, repeat activation once; no Device ID or internet is required.
 
-The private signing key is stored under `.licensing-private` and must never be sent to customers or pushed to GitHub.
+The fixed offline key is intentionally simple for handover and is not equivalent to cryptographic DRM.
 
 ## Current limitations
 
 - Release is Windows x64. It has not been accepted on every laptop.
 - Installer is unsigned, so Windows may show an Unknown Publisher warning.
-- Windows executable icon is still Electron default; IQ Links branding is present inside the app, splash, printed footer and executable metadata.
+- Windows executable uses the square SoleNexa/IQ Links icon; IQ Links branding is also present inside the app, splash, printed footer and executable metadata.
 - Online activation hosting is not deployed because production hosting/domain and licence policy are not yet selected.
 - Shopify live synchronization is not implemented.
-- Size/colour stock is currently stored through article/SKU and PO notes, not independent size-colour inventory.
+- New POs can use independent size/colour quantity and stock bins. Older POs without structured variants remain aggregate article/SKU stock.
 - Payroll proration, overtime, leave and statutory deductions require factory policy confirmation.
-- Large-history pagination and CSV exports remain future work.
+- History tables now paginate at 50 rows per page. Dashboard PDF reports support optional department, worker, PO and date-range filters; Settings provides CSV exports for materials, workers, stock, POs and ledgers.
 
 ## Safe continuation rule
 

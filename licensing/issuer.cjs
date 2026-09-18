@@ -13,8 +13,9 @@ class Issuer {
    CREATE TABLE IF NOT EXISTS issuer_audit(id INTEGER PRIMARY KEY,at INTEGER NOT NULL,action TEXT NOT NULL,license_id TEXT NOT NULL,device_id TEXT NOT NULL);`);
  }
  audit(action,id,device=''){this.db.prepare('INSERT INTO issuer_audit(at,action,license_id,device_id) VALUES(?,?,?,?)').run(this.now(),action,id,device);}
- issue({customer,expiresAt,seats,offlineDays}){
+ issue({customer,expiresAt,seats,offlineDays,validityDays}){
   if(typeof customer!=='string' || !customer.trim() || customer.length>200)throw Error('Customer name required (maximum 200 characters).');
+  if(validityDays !== undefined) { if(!Number.isInteger(validityDays) || validityDays<1 || validityDays>3660)throw Error('Validity must be 1–3660 days.'); expiresAt=this.now()+validityDays*86400000; }
   if(!Number.isSafeInteger(expiresAt) || expiresAt<=this.now())throw Error('Choose a future expiry date.');
   if(!Number.isInteger(seats) || seats<1 || seats>1000)throw Error('Device limit must be 1–1000.');
   if(!Number.isInteger(offlineDays) || offlineDays<1 || offlineDays>3660)throw Error('Offline allowance must be 1–3660 days.');
@@ -33,7 +34,7 @@ class Issuer {
    const count=this.db.prepare('SELECT count(*) AS n FROM devices WHERE license_id=? AND active=1').get(l.id).n;
    if(!previous && count>=l.seats)throw Error('Device limit reached. Contact IQ Links for a transfer.');
    const now=this.now();
-   const token=signedToken({version:1,product:'SoleNexa',licenseId:l.id,customer:l.customer,deviceId,issuedAt:now,expiresAt:l.expires,offlineUntil:Math.min(l.expires,now+l.offline_days*86400000)},this.key);
+   const token=signedToken({version:1,product:'SoleNexa',licenseId:l.id,customer:l.customer,deviceId,issuedAt:now,expiresAt:l.expires,validityDays:Math.max(1,Math.ceil((l.expires-now)/86400000)),offlineUntil:Math.min(l.expires,now+l.offline_days*86400000)},this.key);
    this.db.prepare('INSERT INTO devices VALUES(?,?,1,?) ON CONFLICT(license_id,device_id) DO UPDATE SET last_issued=excluded.last_issued').run(l.id,deviceId,now);
    this.audit('activate',l.id,deviceId);this.db.exec('COMMIT');return {token};
   }catch(e){this.db.exec('ROLLBACK');throw e;}

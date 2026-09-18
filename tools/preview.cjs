@@ -9,7 +9,8 @@ const {LicenceManager}=require("../desktop/licence.cjs");
 const sessions=new Map();
 const root = path.resolve(__dirname, "..");
 const port = Number(process.env.PORT || 4173);
-const store = new Store(path.join(root, ".preview-data", "preview.sqlite"));
+const previewDb = process.env.SOLENEXA_PREVIEW_DB || path.join(root, ".preview-data", "preview.sqlite");
+const store = new Store(previewDb);
 const server = http.createServer(async (req, res) => {
   const host = `127.0.0.1:${port}`;
   if (req.headers.host !== host) {
@@ -32,13 +33,14 @@ const server = http.createServer(async (req, res) => {
       if(!sessions.has(token)) {
         token=randomBytes(24).toString('hex');
         if(sessions.size>100) sessions.delete(sessions.keys().next().value);
-        sessions.set(token,new Security(store,Date.now,new LicenceManager({publicKey:fs.readFileSync(path.join(root,'desktop/licence-public.pem'),'utf8'),file:path.join(root,'.preview-data/licence.json')})));
+        const previewLicence = process.env.SOLENEXA_PREVIEW_LEGACY === "1" ? null : new LicenceManager({file:process.env.SOLENEXA_PREVIEW_ACTIVATION || path.join(path.dirname(previewDb),'preview-activation.json')});
+        sessions.set(token,new Security(store,Date.now,previewLicence));
         res.setHeader('Set-Cookie', 'sole='+token+'; HttpOnly; SameSite=Strict; Path=/');
       }
       const security=sessions.get(token);
-      if (["backup", "restore", "pdf", "print"].includes(action))
+      if (["backup", "restore", "pdf", "print", "whatsapp-share", "qr-code"].includes(action))
         throw Error(
-          "Backup and restore are available in the installed desktop app.",
+          "This desktop-only action is available in the installed SoleNexa app. Browser preview cannot open native file or printer dialogs.",
         );
       const data=action==='info' ? (security.authorize(action),{dbPath:'Separate development database',version:'0.2.0'}) : security.run(action,payload);
       res.setHeader("Content-Type", "application/json");
@@ -54,6 +56,7 @@ const server = http.createServer(async (req, res) => {
     "/index.html": "src/index.html",
     "/style.css": "src/style.css",
     "/app.js": "src/app.js",
+    "/qrcode.js": "src/qrcode.js",
     "/iq-links-logo.png": "iq-links-logo.png",
     "/solenexa-logo.png": "solenexa-logo.png",
   };

@@ -1,52 +1,69 @@
-const {verify,createHash}=require('node:crypto');
-const fs=require('node:fs');
-const path=require('node:path');
-const os=require('node:os');
-const {execFileSync}=require('node:child_process');
-function machineId(){
- let identity;
- if(process.platform==='win32') {
-   const output=execFileSync('reg.exe',['query','HKLM\\SOFTWARE\\Microsoft\\Cryptography','/v','MachineGuid','/reg:64'],{encoding:'utf8',windowsHide:true,timeout:10000});
-   identity=/MachineGuid\s+REG_SZ\s+([^\r\n]+)/i.exec(output)?.[1]?.trim();
-   if(!identity)throw Error('Windows device identity could not be read. Contact IQ Links.');
- }else identity=process.platform+':'+os.hostname();
- return createHash('sha256').update('SoleNexa/device/v1:'+identity).digest('hex');
+const { createHash } = require("node:crypto");
+const fs = require("node:fs");
+const path = require("node:path");
+
+const ACTIVATION_KEY = "IQ-LINKS-OWNER-2026";
+const DAY = 86400000;
+const keyHash = (value) => createHash("sha256").update(String(value)).digest("hex");
+const normalizeKey = (value) => String(value || "").trim().toUpperCase();
+
+function validDays(value) {
+  const days = Number(value);
+  if (!Number.isInteger(days) || days < 1 || days > 3660)
+    throw Error("Validity days must be a whole number from 1 to 3660.");
+  return days;
 }
-function verifyLicence(token,publicKey,deviceId,now=Date.now()){
- if(typeof token!=='string' || token.length>16000)throw Error('Enter a valid IQ Links licence.');
- const parts=token.trim().split('.');
- if(parts.length!==2 || parts.some(x=>!x || !/^[A-Za-z0-9_-]+$/.test(x)))throw Error('Licence format is invalid.');
- const body=Buffer.from(parts[0],'base64url'),signature=Buffer.from(parts[1],'base64url');
- if(signature.length!==64 || !verify(null,body,publicKey,signature))throw Error('Licence signature is invalid.');
- const c=JSON.parse(body.toString('utf8'));
- if(c.version!==1 || c.product!=='SoleNexa' || typeof c.licenseId!=='string' || typeof c.customer!=='string')throw Error('Licence does not belong to SoleNexa.');
- if(c.deviceId!==deviceId)throw Error('Licence belongs to a different device.');
- for(const key of ['issuedAt','expiresAt','offlineUntil'])if(!Number.isSafeInteger(c[key]) || c[key]<=0)throw Error('Licence dates are invalid.');
- if(c.offlineUntil>c.expiresAt || c.issuedAt>=c.offlineUntil)throw Error('Licence dates are invalid.');
- if(c.issuedAt>now+300000)throw Error('Check this computer’s date and time.');
- if(now>=c.expiresAt)throw Error('Licence expired. Contact IQ Links for renewal.');
- if(now>=c.offlineUntil)throw Error('Licence refresh required. Contact IQ Links or activate online.');
- return c;
+
+function verifyLicence(data, now = Date.now()) {
+  if (!data || typeof data !== "object") throw Error("Activation data is invalid.");
+  if (data.keyHash !== keyHash(ACTIVATION_KEY)) throw Error("Activation key is invalid.");
+  if (!Number.isInteger(data.validityDays) || data.validityDays < 1 || data.validityDays > 3660)
+    throw Error("Activation validity is invalid.");
+  for (const name of ["issuedAt", "expiresAt", "lastSeen"])
+    if (!Number.isSafeInteger(data[name]) || data[name] <= 0) throw Error("Activation dates are invalid.");
+  if (data.expiresAt <= data.issuedAt) throw Error("Activation dates are invalid.");
+  if (data.expiresAt !== data.issuedAt + data.validityDays * DAY) throw Error("Activation dates are invalid.");
+  if (data.lastSeen > now + 300000) throw Error("Clock moved backwards. Correct the computer date and time.");
+  if (now >= data.expiresAt) throw Error("Activation period has expired. Enter the activation key and validity days to continue.");
+  return data;
 }
+
 class LicenceManager {
- constructor({publicKey,file,deviceId=machineId(),now=Date.now}){this.publicKey=publicKey;this.file=file;this.deviceId=deviceId;this.now=now;}
- read(){try{return JSON.parse(fs.readFileSync(this.file,'utf8'));}catch(e){if(e.code==='ENOENT')return {};throw Error('Licence file could not be read. Import your licence again.');}}
- write(data){fs.mkdirSync(path.dirname(this.file),{recursive:true});const tmp=this.file+'.tmp';fs.writeFileSync(tmp,JSON.stringify(data),{mode:0o600});fs.renameSync(tmp,this.file);}
- status(){
-  try {
-   const data=this.read();if(!data.token)return {active:false,deviceId:this.deviceId,reason:'Activation required.'};
-   const c=verifyLicence(data.token,this.publicKey,this.deviceId,this.now());
-   if(data.lastSeen>this.now()+300000)throw Error('Clock moved backwards. Correct the computer date and time.');
-   if(!data.lastSeen || this.now()-data.lastSeen>60000)this.write({...data,lastSeen:this.now()});
-   return {active:true,deviceId:this.deviceId,customer:c.customer,licenseId:c.licenseId,expiresAt:c.expiresAt,offlineUntil:c.offlineUntil};
-  }catch(e){return {active:false,deviceId:this.deviceId,reason:e.message};}
- }
- ensure(){const s=this.status();if(!s.active)throw Error('Licence required: '+s.reason);return s;}
- activate(token){
-  verifyLicence(token,this.publicKey,this.deviceId,this.now());
-  let previous={};try{previous=this.read();}catch{}
-  if(previous.lastSeen>this.now()+300000)throw Error('Correct the computer date and time before activating.');
-  this.write({token:token.trim(),lastSeen:this.now()});return this.ensure();
- }
+  constructor({ file, now = Date.now }) { this.file = file; this.now = now; }
+  read() {
+    try { return JSON.parse(fs.readFileSync(this.file, "utf8")); }
+    catch (e) {
+      if (e.code === "ENOENT") return {};
+      throw Error("Activation data could not be read. Enter the activation key again.");
+    }
+  }
+  write(data) {
+    fs.mkdirSync(path.dirname(this.file), { recursive: true });
+    const temp = `${this.file}.tmp`;
+    fs.writeFileSync(temp, JSON.stringify(data), { mode: 0o600 });
+    fs.renameSync(temp, this.file);
+  }
+  status() {
+    try {
+      const data = this.read();
+      if (!data.keyHash) return { active: false, reason: "Activation required." };
+      const valid = verifyLicence(data, this.now());
+      if (this.now() - valid.lastSeen > 60000) this.write({ ...valid, lastSeen: this.now() });
+      return { active: true, expiresAt: valid.expiresAt, validityDays: valid.validityDays };
+    } catch (e) { return { active: false, reason: e.message }; }
+  }
+  ensure() {
+    const status = this.status();
+    if (!status.active) throw Error(`Activation required: ${status.reason}`);
+    return status;
+  }
+  activate(key, days) {
+    if (normalizeKey(key) !== ACTIVATION_KEY) throw Error("Activation key is invalid.");
+    const validityDays = validDays(days), now = this.now(), previous = this.read();
+    if (previous.lastSeen > now + 300000) throw Error("Correct the computer date and time before activating.");
+    this.write({ version: 2, keyHash: keyHash(ACTIVATION_KEY), issuedAt: now, expiresAt: now + validityDays * DAY, lastSeen: now, validityDays });
+    return this.ensure();
+  }
 }
-module.exports={LicenceManager,verifyLicence,machineId};
+
+module.exports = { ACTIVATION_KEY, LicenceManager, verifyLicence, normalizeKey };

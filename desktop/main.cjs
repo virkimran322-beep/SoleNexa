@@ -1,22 +1,47 @@
-const { app, BrowserWindow, ipcMain, dialog, session } = require("electron");
+const { app, BrowserWindow, ipcMain, dialog, session, shell } = require("electron");
 const path = require("node:path");
 const fs = require("node:fs");
 const { pathToFileURL } = require("node:url");
 const { Store } = require("./store.cjs");
 const { Security } = require("./security.cjs");
 const { LicenceManager } = require("./licence.cjs");
-const licensingConfig = require("./licensing-config.json");
-const paperSize = (width) =>
-  width === "58"
+const qrGenerator = require("../src/qrcode.js");
+const paperSize = (width, format) =>
+  format === "a4"
+    ? { width: 210000, height: 297000 }
+    : width === "58"
     ? { width: 58000, height: 250000 }
     : { width: 80000, height: 300000 };
 let store, security, licence,
   win,
-  currentUser = null;
-const entry = path.join(__dirname, "../src/index.html");
-const smoke = process.argv.includes("--smoke-test") && !app.isPackaged;
+  currentUser = null,
+  automaticBackupPath = "";
+const entry = path.join(__dirname, "../src/index.html");function safeLog(event, error) {
+  try {
+    const dir = path.join(app.getPath("userData"), "logs");
+    fs.mkdirSync(dir, { recursive: true });
+    const detail = error ? String(error.message || error).replace(/[\r\n]/g, " ").slice(0, 500) : "";
+    fs.appendFileSync(path.join(dir, "desktop.log"), `${new Date().toISOString()} ${event}${detail ? `: ${detail}` : ""}\n`, "utf8");
+  } catch {}
+}
+function createAutomaticBackup(database) {
+  const dir = path.join(app.getPath("userData"), "backups");
+  fs.mkdirSync(dir, { recursive: true });
+  const destination = path.join(dir, `auto-${new Date().toISOString().replace(/[:.]/g, "-")}.sqlite`);
+  database.backup(destination);
+  const files = fs.readdirSync(dir).filter((name) => /^auto-.*\.sqlite$/.test(name)).map((name) => ({ name, time: fs.statSync(path.join(dir, name)).mtimeMs })).sort((a, b) => b.time - a.time);
+  for (const file of files.slice(7)) fs.rmSync(path.join(dir, file.name), { force: true });
+  return destination;
+}
+process.on("uncaughtException", (error) => {
+  safeLog("uncaught-exception", error);
+  if (app.isReady()) dialog.showErrorBox("SoleNexa error", "The application encountered an unexpected error. Your data was not intentionally deleted. Please restart SoleNexa and contact IQ Links if it continues.");
+});
+process.on("unhandledRejection", (error) => safeLog("unhandled-rejection", error));const smoke = process.argv.includes("--smoke-test");
 if (smoke) {
-  const data = path.resolve(__dirname, "../artifacts/desktop-smoke-data");
+  const data = app.isPackaged
+    ? path.join(app.getPath("temp"), `SoleNexa-desktop-smoke-${process.pid}`)
+    : path.resolve(__dirname, "../artifacts/desktop-smoke-data");
   fs.mkdirSync(data, { recursive: true });
   app.setPath("userData", data);
 }
@@ -38,7 +63,9 @@ if (!app.requestSingleInstanceLock()) {
         "solenexa.sqlite",
       );
       store = new Store(dbPath);
-      licence = new LicenceManager({publicKey:fs.readFileSync(path.join(__dirname,'licence-public.pem'),'utf8'),file:path.join(app.getPath('userData'),'licence.json')});
+      automaticBackupPath = createAutomaticBackup(store);
+      safeLog("startup");
+      licence = new LicenceManager({file:path.join(app.getPath('userData'),'activation.json')});
       security = new Security(store,Date.now,licence);
       session.defaultSession.setPermissionRequestHandler((_w, _p, cb) =>
         cb(false),
@@ -69,20 +96,34 @@ if (!app.requestSingleInstanceLock()) {
             event.senderFrame.url.split("#")[0] !== pathToFileURL(entry).href
           )
             throw Error("Unauthorized window.");
-          if(action==='activate-online') {
-            const endpoint=licensingConfig.activationUrl;
-            if(!endpoint || new URL(endpoint).protocol!=='https:')throw Error('Online activation is not configured. Request a signed licence from IQ Links.');
-            if(typeof payload?.code!=='string' || payload.code.length>200)throw Error('Enter an activation code.');
-            const response=await fetch(endpoint,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({code:payload.code,deviceId:licence.deviceId}),signal:AbortSignal.timeout(15000),redirect:'error'});
-            const data=await response.json();
-            if(!response.ok)throw Error(data.error || 'Activation server rejected the request.');
-            return {ok:true,data:security.run('activate',{key:data.token})};
-          }
-          if (!["info","backup","restore","print","pdf"].includes(action)) return {ok:true,data:security.run(action,payload)};
-          security.authorize(action);
+          if (!["info","backup","restore","print","pdf","export-csv","whatsapp-share","qr-code"].includes(action)) return {ok:true,data:security.run(action,payload)};
+          security.authorize(action, payload);
           if (action === "info")
-            return { ok: true, data: { dbPath, version: app.getVersion() } };
+            return { ok: true, data: { dbPath, backupDir: path.dirname(automaticBackupPath), logsDir: path.join(app.getPath("userData"), "logs"), version: app.getVersion() } };
 
+          if (action === "export-csv") {
+            const kind = String(payload?.kind || "");
+            const result = await dialog.showSaveDialog(win, { title: "Export SoleNexa CSV", defaultPath: `SoleNexa-${kind}-${Date.now()}.csv`, filters: [{ name: "CSV spreadsheet", extensions: ["csv"] }] });
+            if (result.canceled) return { ok: true, data: null };
+            fs.writeFileSync(result.filePath, security.run("export-csv", { kind }), "utf8");
+            return { ok: true, data: result.filePath };
+          }
+          if (action === "whatsapp-share") {
+            const text = String(payload?.text || "").trim();
+            if (!text || text.length > 4000) throw Error("Report summary is empty or too long.");
+            const phone = String(payload?.phone || "").replace(/\D/g, "");
+            if (phone && !/^\d{8,15}$/.test(phone)) throw Error("Supplier WhatsApp number is invalid.");
+            await shell.openExternal(`https://wa.me/${phone}?text=${encodeURIComponent(text)}`);
+            return { ok: true, data: true };
+          }
+          if (action === "qr-code") {
+            const value = String(payload?.value || "").trim();
+            if (!value || value.length > 200) throw Error("QR payload is empty or too long.");
+            const qr = qrGenerator(0, "M");
+            qr.addData(value);
+            qr.make();
+            return { ok: true, data: qr.createSvgTag(4, 0) };
+          }
           if (action === "backup") {
             const result = await dialog.showSaveDialog(win, {
               title: "Save SoleNexa backup",
@@ -126,6 +167,8 @@ if (!app.requestSingleInstanceLock()) {
               throw e;
             } finally {
               store = new Store(dbPath);
+              automaticBackupPath = createAutomaticBackup(store);
+              safeLog("restore-complete");
               security = new Security(store, Date.now, licence);
             }
             return { ok: true, data: { recovery } };
@@ -133,7 +176,7 @@ if (!app.requestSingleInstanceLock()) {
           if (action === "print") {
             return await new Promise((resolve) =>
               win.webContents.print(
-                { silent: false, printBackground: false },
+                { silent: false, printBackground: false, pageSize: paperSize(payload?.paper, payload?.format) },
                 (success, reason) =>
                   resolve(
                     success
@@ -153,7 +196,7 @@ if (!app.requestSingleInstanceLock()) {
             const pdf = await win.webContents.printToPDF({
               printBackground: true,
               marginsType: "none",
-              pageSize: paperSize(payload?.paper),
+              pageSize: paperSize(payload?.paper, payload?.format),
             });
             fs.writeFileSync(result.filePath, pdf);
             return { ok: true, data: result.filePath };
@@ -181,7 +224,10 @@ if (!app.requestSingleInstanceLock()) {
             throw Error(
               "Desktop smoke check failed: " + JSON.stringify(result),
             );
-          const out = path.resolve(__dirname, "../artifacts");
+          const out = app.isPackaged
+            ? path.join(app.getPath("userData"), "artifacts")
+            : path.resolve(__dirname, "../artifacts");
+          fs.mkdirSync(out, { recursive: true });
           fs.writeFileSync(
             path.join(out, "desktop-smoke.json"),
             JSON.stringify(result, null, 2),
@@ -195,6 +241,7 @@ if (!app.requestSingleInstanceLock()) {
       }
     })
     .catch((e) => {
+      safeLog("startup-failed", e);
       dialog.showErrorBox("SoleNexa could not start", e.message);
       app.quit();
     });

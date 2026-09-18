@@ -31,7 +31,9 @@ Offline Windows desktop software for a footwear factory with a Shopify store. Fa
 - [x] Dashboard/navigation with real empty states, no fake production data.
 - [x] IQ Links animated splash, offline activation gate, first-run factory identity setup and owner sign-in.
 - [x] Local user records with hashed passwords and role choices; fine-grained role enforcement remains a later iteration.
-- [x] Day/night appearance toggle and IQ Links default application branding.
+- [x] Light-only IQ Links application branding; night mode removed.
+- [x] English-only UI, reports and print output.
+- [x] A4 factory reports with production graph and optional WhatsApp summary handoff.
 
 ### 3. Factory records and costing
 - [x] Materials with units, rates, reorder thresholds and stock ledger.
@@ -58,28 +60,38 @@ Offline Windows desktop software for a footwear factory with a Shopify store. Fa
 - [x] Export backup and validated restore with pre-restore backup implemented; backup integrity/persistence covered by tests. Native restore-dialog acceptance remains below.
 - [x] Core tests: costing, allocation, receipts, stock, attendance, salary, settlement, persistence.
 - [x] UI interaction and visual verification on desktop and narrow viewport.
+- [x] Light-first blue factory ERP redesign with dashboard hero, modern cards, sidebar, tables, forms and responsive states.
 - [x] Packaged Windows application and installer. `release/SoleNexa Setup 0.1.0.exe` built for Windows x64; SHA256: `302268A99A525BAD44527BFCBA7D671075DFACF12C630BE3048CDB7AE4D9BD14`.
 - [x] User guide with setup, workflow, backup and known limitations.
+- [x] Technical audit report covering Windows compatibility, installer, protected storage, backups, isolation and deployment.
 - [ ] Factory acceptance on actual computer and thermal printer (requires hardware).
 
 ### 7. Next offline iteration — before routine live use
 - [x] Master-data editing/rate revisions with change history.
-- [ ] Audited corrections, assignment cancellation/reallocation and transaction reversals.
-- [ ] Department-wise labour costing and estimated-versus-actual PO costing report.
+- [x] Audited corrections, assignment cancellation/reallocation and transaction reversals.
+- [x] Automated offline factory trial from material receipt through dispatch and Saturday settlement.
+- [x] Department-wise labour costing and estimated-versus-actual PO costing report.
 - [x] Daily, weekly and monthly factory PDF reports covering activity, staff accounts and raw-material stock.
-- [ ] Large-history pagination, CSV exports and additional production/account reports.
-- [ ] Dedicated app icon and signed distribution.
+- [x] Large-history pagination, CSV exports and report filters for department, worker, PO and date range.
+- [x] Dedicated square app icon added; code-signing certificate is still required for signed distribution.
 - [ ] Native backup/restore dialogue acceptance, factory data trial and payroll policy confirmation.
 
 ### Later stages — not part of first offline release
-- [ ] Supplier purchasing/accounts payable, purchase returns and landed-cost valuation.
-- [ ] Size/colour-level inventory and barcode labels.
+- [x] Offline supplier purchasing, accounts payable, purchase returns and supplier CSV exports. Landed-cost valuation remains future work.
+- [x] Structured size/colour PO breakdown with exact pair-total validation; legacy POs remain compatible.
+- [x] Independent finished-stock and dispatch bins for new PO size/colour variants; legacy PO-level stock remains compatible.
+- [ ] Barcode scanning; offline Code 39 label preview/printing is implemented for new variant POs. Physical scanner acceptance remains pending.
 - [ ] Permission roles, audit reversal UI, approval workflows and multi-user concurrency.
 - [ ] Payroll proration, overtime, leave and statutory deductions per confirmed policies.
 - [ ] Shopify order import, SKU mapping, secure token storage and online sync.
 - [ ] Off-site automatic backups and signed update distribution.
 
 ## Verification log
+
+- 2026-09-16: Phase 2A audited corrections, assignment cancellation, Electron correction dialog, responsive UI and Windows NSIS/portable build checks passed.
+- 2026-09-16: Full offline supplier-to-payroll trial passed for purchase receive/return/payment, PO issue, piece accepted/rework earnings, daily attendance, completed-month salary, finished dispatch and settlement. Fixed blank supplier dialogs, invoice-aware purchase-return material selection and unnecessary piece-rate validation for daily/salary assignments; 51 automated tests pass.
+- 2026-09-16: Stock movement receive now offers active suppliers with automatic quantity × material-rate payable posting, audited linked correction, and browser verification; 52 automated tests pass.
+- 2026-09-16: Phase 2B department costing, PO estimated-vs-actual report, production/rejection summaries, dashboard alerts, 35-test suite, redesigned light-first Electron UI, responsive, smoke, and Windows NSIS/portable build checks passed.
 - 2026-09-12: 11 automated Node tests passed, including safe database-version rejection; JavaScript syntax checks passed.
 - Electron desktop smoke passed with isolated data: IPC snapshot succeeds, 5 default departments, dashboard heading rendered, Node not exposed to renderer. Result: artifacts/desktop-smoke.json.
 - Browser UI walkthrough: TEST Leather (yard) → cost sheet (0.5 yard at Rs 100 + 10% waste + Rs 25 labour + Rs 10 overhead = Rs 90/pair) → 100-pair PO → TEST Ali with Rs 100 advance → 40-pair Upper assignment at Rs 20 → accepted output earns Rs 800.
@@ -88,11 +100,13 @@ Offline Windows desktop software for a footwear factory with a Shopify store. Fa
 - Visual checks at 1280px and 375px; fixed table-induced page overflow. No browser error logs at the inspected checkpoint.
 - Browser test data resides only in .preview-data; development desktop smoke data only in artifacts. Both excluded from installer. The factory installation starts empty.
 - Actual thermal printing, clean-machine installation and business acceptance have not been verified. A checked code item does not imply factory/printer acceptance.
-- Installer build is unsigned and uses Electron's default executable icon; install and printer checks still require the factory computer.
+- Installer build is unsigned; the dedicated square executable icon is included. Install and printer checks still require the factory computer.
 - 2026-09-12: Installer rebuilt with IQ Links logo, animated splash, activation gate, first-run factory setup, owner account flow, local hashed-password login and Day/Night mode.
 - 2026-09-12: Added visible IQ Links splash motion, powered-by footer on every print document, Save PDF export and daily/weekly/monthly factory report actions.
 - 2026-09-12: Fresh preview flow verified: activation → factory name/owner/contact/address → owner account → sign in → dashboard. Wrong/empty activation is rejected. Demo data remained in preview storage only.
 - 2026-09-15: Material, worker and department revisions added with before/after history and change reasons. Existing cost, PO and assignment snapshots remain unchanged. 27 automated tests and the Electron UI regression passed.
 
 ## Phase 1 update — 2026-09-15
-See PHASE-1.md for verified changes and remaining acceptance work. Version 0.2.3 includes signed device licensing plus controlled master-data revisions. Public online activation, factory acceptance and printer acceptance remain pending.
+See PHASE-1.md for verified changes and remaining acceptance work. Version 0.2.3 currently uses the owner-requested fixed offline activation key plus validity days, controlled master-data revisions and audited corrections. Public online activation, factory acceptance and printer acceptance remain pending.
+
+- 2026-09-18: Full isolated browser and backend factory-flow audit passed with 53 automated tests. Security, correction dependency, QR receipt, report filtering, PO costing allocation, salary-month default, backup/restore PIN and profile-logo issues found during the audit were fixed.

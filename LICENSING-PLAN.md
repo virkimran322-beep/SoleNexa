@@ -1,23 +1,21 @@
-# Licensing implementation plan — pending Phase 1 work
+# Licensing implementation plan — offline edition
 
 ## Required behavior
 
-- IQ Links issues a separate licence for each customer installation.
+- Each computer activates locally with the fixed IQ Links key and a selected validity period.
 - Factory operations continue offline after activation within an explicitly chosen licence term.
-- The app contains a public verification key only. Issuing credentials and private signing keys stay outside the app and source repository.
-- A signed licence contains customer ID, installation ID, product, expiry and licence ID.
-- Online activation registers a device against the installation allowance. Device transfer and revocation require an IQ Links administrator.
-- Connection failures must show retry/status without deleting factory records.
+- The app requires no server, internet connection, Device ID or customer-specific token.
+- Activation data is stored in the Windows application-data folder and is separate from the factory SQLite database.
+- Expiry, validity range and clock rollback are checked locally; renewal never recreates the database.
 - Existing factory databases retain records during migration; replacing the licence must not recreate the database.
 
 ## Work sequence
 
 - [ ] Confirm production hosting/account and customer licence terms.
-- [x] Implement signed-licence verification and tests for alteration, expiry, wrong device and clock rollback.
-- [x] Implement authenticated issuance/activation service, durable device registration and administrator operations.
-- [x] Add activation status, expiry and transfer instructions to desktop UI.
-- [x] Test offline restart, network failure, expired licence, transferred device and concurrent activation limits.
+- [x] Implement fixed-key offline activation, expiry, tamper and clock rollback tests.
+- [x] Add activation status and renewal controls without Device ID UI.
+- [x] Test first activation, offline restart, expired period and renewal.
 - [ ] Deploy HTTPS endpoint and provision signing credentials outside source control.
 - [ ] End-to-end acceptance on a second physical machine.
 
-Version 0.2.2 uses signed, device-bound offline licence files and no longer accepts the shared pilot key. A hosting target and licence policy are still needed before enabling online activation. Until then, IQ Links creates a licence from the Device ID shown by the app and sends the signed licence text to the customer.
+The current offline edition uses `IQ-LINKS-OWNER-2026` plus 1–3660 validity days. A determined reverse-engineer can inspect a client-only fixed key; this is a deliberate trade-off for simple offline customer handover. Online licensing remains a separate future product phase and is not required by the current build.

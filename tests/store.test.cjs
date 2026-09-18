@@ -48,11 +48,46 @@ function fixture(t) {
   });
   return { s, m, c, w, dep, p };
 }
-test("per-pair costing includes wastage, labour and overhead; PO snapshots it", (t) => {
+test("factory profile edits preserve production snapshots", (t) => {
+  const { s, p } = fixture(t);
+  s.command("activate", { key: "IQ-LINKS-OWNER-2026" });
+  s.command("setup-company", { companyName: "Factory", owner: "Owner" });
+  s.command("create-user", { username: "owner", role: "owner", password: "Testing123" });
+  const beforeSnapshot = JSON.stringify(s.get("po", p.id).costSnapshot);
+  s.command("company-profile", { companyName: "Updated Factory", owner: "New Owner", contact: "0300-1234567", address: "New factory address", companyLogo: "data:image/png;base64,UPDATED" });
+  assert.equal(s.config().companyName, "Updated Factory");
+  assert.equal(s.config().owner, "New Owner");
+  assert.equal(s.config().contact, "0300-1234567");
+  assert.equal(s.config().address, "New factory address");
+  assert.equal(s.config().companyLogo, "data:image/png;base64,UPDATED");
+  assert.equal(JSON.stringify(s.get("po", p.id).costSnapshot), beforeSnapshot);
+  s.command("company-profile", { companyName: "Updated Factory", owner: "New Owner", contact: "", address: "", removeLogo: "true" });
+  assert.equal(s.config().companyLogo, "");
+});test("per-pair costing includes wastage, labour and overhead; PO snapshots it", (t) => {
   const { c, p } = fixture(t);
   assert.equal(c.total, 9000);
   assert.equal(c.lines[0].amount, 5500);
   assert.equal(p.costSnapshot.total, 9000);
+});
+test("PO costing separates estimates, actual material and mixed labour variance", (t) => {
+  const { s, m, p, w, dep } = fixture(t);
+  const daily = s.command("worker", { name: "Daily cost", basis: "daily", rate: 1200 });
+  const salary = s.command("worker", { name: "Salary cost", basis: "salary", rate: 30000 });
+  s.command("stock", { materialId: m.id, type: "receive", quantity: 10, note: "Supplier" });
+  s.command("stock", { materialId: m.id, type: "issue", quantity: 5, poId: p.id, note: "PO issue" });
+  const a = s.command("assignment", { poId: p.id, workerId: w.id, departmentId: dep.id, unit: "pair", quantity: 10, rate: 20 });
+  s.command("receipt", { assignmentId: a.id, accepted: 6, rejected: 4 });
+  s.command("attendance", { workerId: daily.id, days: 0.5 });
+  s.event("salary", salary.id, today(), { month: today().slice(0, 7), amount: salary.rate, note: "Test salary" });
+  const report = s.poCosting(p);
+  assert.deepEqual(report.estimated, { material: 550000, labour: 250000, overhead: 100000, total: 900000 });
+  assert.equal(report.actual.material, 50000);
+  assert.equal(report.labourBreakdown.piece, 12000);
+  assert.equal(report.labourBreakdown.daily, 60000);
+  assert.equal(report.labourBreakdown.salary, 3000000);
+  assert.equal(report.actual.labour, 12000);
+  assert.equal(report.labourBreakdown.unallocated,3060000);
+  assert.equal(report.variance.total, -838000);
 });
 test("master data revisions keep historical snapshots and record a readable history", (t) => {
   const { s, m, c, w, dep, p } = fixture(t);
@@ -273,6 +308,88 @@ test("salary and daily assignments never produce piece earnings", (t) => {
   s.command("receipt", { assignmentId: a.id, accepted: 10, rejected: 0 });
   assert.equal(s.balance(w.id).earned, 0);
 });
+
+test("unfinished assignments can be cancelled and safely reallocated", (t) => {
+  const { s, p, w, dep } = fixture(t);
+  const a = s.command("assignment", { poId: p.id, workerId: w.id, departmentId: dep.id, unit: "pair", quantity: 40, rate: 20 });
+  s.command("cancel-assignment", { id: a.id, reason: "Worker unavailable" });
+  assert.equal(s.get("assignment", a.id).cancelled, true);
+  assert.equal(s.poStats(p).departments[0].assigned, 0);
+  assert.throws(() => s.command("receipt", { assignmentId: a.id, accepted: 1, rejected: 0 }), /Cancelled/);
+  const replacement = s.command("assignment", { poId: p.id, workerId: w.id, departmentId: dep.id, unit: "pair", quantity: 40, rate: 20 });
+  assert.equal(replacement.cancelled, undefined);
+  const received = s.command("receipt", { assignmentId: replacement.id, accepted: 40, rejected: 0 });
+  assert.ok(received.id);
+  assert.throws(() => s.command("cancel-assignment", { id: replacement.id, reason: "Too late" }), /received work/);
+});
+test("audited corrections reverse posted events exactly once and preserve balances", (t) => {
+  const { s, m, p, w, dep } = fixture(t);
+  const a = s.command("assignment", { poId: p.id, workerId: w.id, departmentId: dep.id, unit: "pair", quantity: 10, rate: 20 });
+  const receipt = s.command("receipt", { assignmentId: a.id, accepted: 6, rejected: 2, note: "Wrong count" });
+  assert.equal(s.balance(w.id).earned, 12000);
+  const correction = s.command("correct-event", { eventId: receipt.id, reason: "Supervisor verified wrong count" });
+  assert.equal(correction.data.originalEventId, receipt.id);
+  assert.equal(s.balance(w.id).earned, 0);
+  assert.deepEqual(s.received(a.id), { accepted: 0, rejected: 0 });
+  assert.throws(() => s.command("correct-event", { eventId: receipt.id, reason: "Again" }), /already/);
+  const reversal = s.events(a.id).find((e) => e.data.reversalOf === receipt.id);
+  assert.equal(reversal.data.accepted, -6);
+  assert.ok(s.events().some((e) => e.kind === "correction" && e.data.originalEventId === receipt.id));
+});
+
+test("attendance corrections reverse the posted wage without deleting history", (t) => {
+  const { s } = fixture(t);
+  const w = s.command("worker", { name: "Daily correction", basis: "daily", rate: 1200 });
+  const attendance = s.command("attendance", { workerId: w.id, days: 1 });
+  assert.equal(s.balance(w.id).earned, 120000);
+  s.command("correct-event", { eventId: attendance.id, reason: "Attendance marked absent after review" });
+  assert.equal(s.balance(w.id).earned, 0);
+  assert.equal(s.events(w.id).filter((e) => e.kind === "attendance").length, 2);
+});
+test("audited stock and settlement corrections preserve compensating balances", (t) => {
+  const { s, m, p, w, dep } = fixture(t);
+  const stock = s.command("stock", { materialId: m.id, type: "receive", quantity: 10, note: "Wrong receive" });
+  s.command("correct-event", { eventId: stock.id, reason: "Invoice correction" });
+  assert.equal(s.stock(m.id), 0);
+  const a = s.command("assignment", { poId: p.id, workerId: w.id, departmentId: dep.id, unit: "pair", quantity: 10, rate: 20 });
+  s.command("receipt", { assignmentId: a.id, accepted: 10, rejected: 0 });
+  const settlement = s.command("settlement", { workerId: w.id, amount: 100, recovery: 0, note: "Wrong cash" });
+  const before = s.balance(w.id);
+  s.command("correct-event", { eventId: settlement.id, reason: "Cash amount corrected" });
+  assert.equal(s.balance(w.id).payable, before.payable + 10000);
+});
+
+test("inactive master records are retained but blocked from new transactions", (t) => {
+  const { s, m, p, w, dep } = fixture(t);
+  s.command("material-revise", { id: m.id, name: m.name, unit: m.unit, rate: 100, reorder: 5, active: "false", reason: "Material retired" });
+  assert.equal(s.get("material", m.id).active, false);
+  assert.throws(() => s.command("cost", { name: "Blocked", sku: "BLK", lines: [{ materialId: m.id, quantity: 1, wastage: 0 }], labour: 0, overhead: 0 }), /Inactive materials/);
+  s.command("worker-revise", { id: w.id, name: w.name, phone: "", basis: w.basis, rate: 20, active: "false", reason: "Worker inactive" });
+  assert.throws(() => s.command("assignment", { poId: p.id, workerId: w.id, departmentId: dep.id, unit: "pair", quantity: 1, rate: 20 }), /Inactive workers/);
+});
+
+test("CSV exports are quoted and spreadsheet-formula safe", (t) => {
+  const { s } = fixture(t);
+  s.command("material", { name: "=Unsafe", unit: "pcs", rate: 10, reorder: 1 });
+  const csv = s.exportCsv("materials");
+  assert.match(csv, /"ID","Name","Unit"/);
+  assert.match(csv, /"'=Unsafe"/);
+  assert.match(csv, /"true"/);
+  assert.throws(() => s.exportCsv("unknown"), /supported CSV/);
+});
+test("offline factory trial completes material-to-dispatch workflow", (t) => {
+  const { s, m, p, w, dep } = fixture(t);
+  s.command("stock", { materialId: m.id, type: "receive", quantity: 10, note: "Supplier delivery" });
+  s.command("stock", { materialId: m.id, type: "issue", quantity: 5, poId: p.id, note: "Issue to production" });
+  const assignment = s.command("assignment", { poId: p.id, workerId: w.id, departmentId: dep.id, unit: "pair", quantity: 20, rate: 20 });
+  s.command("receipt", { assignmentId: assignment.id, accepted: 18, rejected: 2, note: "Department receipt" });
+  s.command("finished", { poId: p.id, quantity: 18, note: "Packed finished pairs" });
+  s.command("dispatch", { poId: p.id, quantity: 12, note: "Customer dispatch" });
+  assert.equal(s.poStats(p).available, 6);
+  s.command("settlement", { workerId: w.id, amount: 250, recovery: 50, note: "Saturday settlement" });
+  assert.equal(s.balance(w.id).payable, 6000);
+  assert.equal(s.balance(w.id).advanceDue, 5000);
+});
 test("disk persistence and validated backup preserve data", (t) => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "solenexa-test-"));
   t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
@@ -319,4 +436,181 @@ test("invalid input rolls back all changes and backdated stock cannot go negativ
       }),
     /Not enough/,
   );
+});
+
+test("offline purchasing receives materials and tracks supplier payable", (t) => {
+  const { s, m } = fixture(t);
+  const supplier = s.command("supplier", { name: "Prime Leather", phone: "0300-1234567", address: "Lahore" });
+  const purchase = s.command("purchase", {
+    supplierId: supplier.id,
+    invoice: "INV-1001",
+    date: today(),
+    lines: [{ materialId: m.id, quantity: 10, rate: 120 }],
+    note: "Leather delivery",
+  });
+  assert.equal(purchase.total, 120000);
+  assert.equal(s.stock(m.id), 10);
+  assert.equal(s.supplierBalance(supplier.id).purchased, 120000);
+  assert.equal(s.supplierBalance(supplier.id).payable, 120000);
+  assert.equal(s.events(m.id).find((e) => e.kind === "stock").data.purchaseId, purchase.id);
+  assert.throws(() => s.command("purchase", { supplierId: supplier.id, invoice: "INV-1001", date: today(), lines: [{ materialId: m.id, quantity: 1, rate: 120 }] }), /invoice/);
+});
+
+test("stock receive can post an automatic supplier payable at the material rate", (t) => {
+  const { s, m } = fixture(t);
+  const supplier = s.command("supplier", { name: "Direct Receipt Supplier" });
+  const stock = s.command("stock", { materialId: m.id, type: "receive", quantity: 10, supplierId: supplier.id, note: "Direct delivery" });
+  assert.equal(s.stock(m.id), 10);
+  assert.equal(s.supplierBalance(supplier.id).purchased, 100000);
+  const payable = s.events(supplier.id).find((e) => e.kind === "supplier-receive");
+  assert.equal(payable.data.amount, 100000);
+  assert.equal(payable.data.rate, m.rate);
+  s.command("correct-event", { eventId: stock.id, reason: "Wrong direct receipt" });
+  assert.equal(s.stock(m.id), 0);
+  assert.equal(s.supplierBalance(supplier.id).payable, 0);
+  assert.ok(s.events(supplier.id).some((e) => e.kind === "supplier-receive" && e.data.reversalOf === payable.id));
+});
+
+test("purchase returns reduce stock and supplier payable without allowing over-return", (t) => {
+  const { s, m } = fixture(t);
+  const supplier = s.command("supplier", { name: "Return Supplier" });
+  const purchase = s.command("purchase", { supplierId: supplier.id, invoice: "RET-1", date: today(), lines: [{ materialId: m.id, quantity: 10, rate: 100 }] });
+  const returned = s.command("purchase-return", { purchaseId: purchase.id, materialId: m.id, quantity: 3, date: today(), note: "Damaged rolls" });
+  assert.equal(returned.data.quantity, 3);
+  assert.equal(s.stock(m.id), 7);
+  assert.equal(s.supplierBalance(supplier.id).returned, 30000);
+  assert.equal(s.supplierBalance(supplier.id).payable, 70000);
+  assert.throws(() => s.command("purchase-return", { purchaseId: purchase.id, materialId: m.id, quantity: 8, date: today(), note: "Too much" }), /exceeds/);
+});
+
+test("supplier payments are separate, capped by payable and visible in ledger", (t) => {
+  const { s, m } = fixture(t);
+  const supplier = s.command("supplier", { name: "Paid Supplier" });
+  s.command("purchase", { supplierId: supplier.id, invoice: "PAY-1", date: today(), lines: [{ materialId: m.id, quantity: 5, rate: 100 }] });
+  s.command("supplier-payment", { supplierId: supplier.id, amount: 200, date: today(), note: "Part payment" });
+  assert.equal(s.supplierBalance(supplier.id).paid, 20000);
+  assert.equal(s.supplierBalance(supplier.id).payable, 30000);
+  assert.throws(() => s.command("supplier-payment", { supplierId: supplier.id, amount: 400, date: today(), note: "Overpay" }), /exceeds/);
+  assert.equal(s.events(supplier.id).filter((e) => e.kind === "supplier-payment").length, 1);
+});
+
+test("end-to-end factory trial covers supplier stock and every worker payment basis", (t) => {
+  const { s, m, c, p, w, dep } = fixture(t);
+  const supplier = s.command("supplier", { name: "End-to-end Materials", phone: "0300-1112222" });
+  const purchase = s.command("purchase", {
+    supplierId: supplier.id,
+    invoice: "E2E-001",
+    date: today(),
+    lines: [{ materialId: m.id, quantity: 20, rate: 120 }],
+    note: "Opening leather delivery",
+  });
+  assert.equal(purchase.total, 240000);
+  assert.equal(s.stock(m.id), 20);
+  s.command("purchase-return", { purchaseId: purchase.id, materialId: m.id, quantity: 2, date: today(), note: "Damaged leather" });
+  assert.equal(s.stock(m.id), 18);
+  s.command("supplier-payment", { supplierId: supplier.id, amount: 100, date: today(), note: "Part payment" });
+  assert.deepEqual(s.supplierBalance(supplier.id), { purchased: 240000, returned: 24000, paid: 10000, payable: 206000 });
+
+  s.command("stock", { materialId: m.id, type: "issue", quantity: 5, poId: p.id, date: today(), note: "Issued to production" });
+  const piece = s.command("assignment", { poId: p.id, workerId: w.id, departmentId: dep.id, unit: "pair", quantity: 20, rate: 20 });
+  s.command("receipt", { assignmentId: piece.id, accepted: 15, rejected: 5, date: today(), note: "First quality check" });
+  s.command("receipt", { assignmentId: piece.id, accepted: 5, rejected: 0, date: today(), note: "Rework accepted" });
+  assert.equal(s.balance(w.id).earned, 40000);
+  assert.deepEqual(s.received(piece.id), { accepted: 20, rejected: 5 });
+
+  const daily = s.command("worker", { name: "Daily Trial Worker", basis: "daily", rate: 1200 });
+  s.command("attendance", { workerId: daily.id, days: 1, date: today() });
+  assert.equal(s.balance(daily.id).earned, 120000);
+  assert.throws(() => s.command("attendance", { workerId: daily.id, days: 1, date: today() }), /already posted/);
+
+  const salary = s.command("worker", { name: "Salary Trial Worker", basis: "salary", rate: 30000 });
+  const previousMonth = new Date(new Date().getFullYear(), new Date().getMonth() - 1, 1);
+  const month = `${previousMonth.getFullYear()}-${String(previousMonth.getMonth() + 1).padStart(2, "0")}`;
+  s.command("salary", { workerId: salary.id, month, date: today() });
+  assert.equal(s.balance(salary.id).earned, 3000000);
+  assert.throws(() => s.command("salary", { workerId: salary.id, month, date: today() }), /already posted/);
+
+  s.command("finished", { poId: p.id, quantity: 20, date: today(), note: "Packed finished pairs" });
+  s.command("dispatch", { poId: p.id, quantity: 7, date: today(), note: "Trial dispatch" });
+  assert.equal(s.poStats(p).available, 13);
+  s.command("settlement", { workerId: w.id, amount: 300, recovery: 100, date: today(), note: "Saturday settlement" });
+  assert.deepEqual(s.balance(w.id), { earned: 40000, paid: 30000, advance: 10000, recovered: 10000, payable: 0, advanceDue: 0 });
+});
+
+test("production PO can preserve validated size and colour quantity breakdown", (t) => {
+  const { s, c, dep } = fixture(t);
+  const p = s.command("po", {
+    costId: c.id, quantity: 100, departments: [dep.id], due: today(),
+    variants: [{ size: "40", color: "Black", quantity: 60 }, { size: "41", color: "Black", quantity: 40 }],
+  });
+  assert.deepEqual(p.variants.map((v) => v.quantity), [60, 40]);
+  assert.throws(() => s.command("po", { costId: c.id, quantity: 100, departments: [dep.id], due: today(), variants: [{ size: "40", color: "Black", quantity: 99 }] }), /must equal/);
+  assert.throws(() => s.command("po", { costId: c.id, quantity: 100, departments: [dep.id], due: today(), variants: [{ size: "40", color: "Black", quantity: 60 }, { size: "40", color: "Black", quantity: 40 }] }), /unique/);
+});
+
+test("variant finished stock and dispatch stay in separate size-colour bins", (t) => {
+  const { s, c, dep, w } = fixture(t);
+  const p = s.command("po", { costId: c.id, quantity: 100, departments: [dep.id], due: today(), variants: [{ size: "40", color: "Black", quantity: 60 }, { size: "41", color: "Black", quantity: 40 }] });
+  const a = s.command("assignment", { poId: p.id, workerId: w.id, departmentId: dep.id, unit: "pair", quantity: 100, rate: 20 });
+  s.command("receipt", { assignmentId: a.id, accepted: 100, rejected: 0 });
+  s.command("finished", { poId: p.id, variantKey: "40::Black", quantity: 60, note: "Size 40 packed" });
+  s.command("finished", { poId: p.id, variantKey: "41::Black", quantity: 40, note: "Size 41 packed" });
+  s.command("dispatch", { poId: p.id, variantKey: "40::Black", quantity: 20, note: "Size 40 dispatch" });
+  assert.deepEqual(s.poStats(p).variantStats.map((v) => [v.key, v.finished, v.dispatched, v.available]), [["40::Black", 60, 20, 40], ["41::Black", 40, 0, 40]]);
+  assert.throws(() => s.command("finished", { poId: p.id, variantKey: "40::Black", quantity: 1, note: "Over variant" }), /variant/);
+  assert.throws(() => s.command("dispatch", { poId: p.id, variantKey: "41::Black", quantity: 41, note: "Over variant" }), /variant/);
+});
+
+test("supplier return and payment corrections preserve audit history and balances", (t) => {
+  const { s, m } = fixture(t);
+  const supplier = s.command("supplier", { name: "Correction Supplier" });
+  const purchase = s.command("purchase", { supplierId: supplier.id, invoice: "COR-1", date: today(), lines: [{ materialId: m.id, quantity: 10, rate: 100 }] });
+  const returned = s.command("purchase-return", { purchaseId: purchase.id, materialId: m.id, quantity: 2, date: today(), note: "Wrong return" });
+  const payment = s.command("supplier-payment", { supplierId: supplier.id, amount: 100, date: today(), note: "Wrong payment" });
+  assert.equal(s.stock(m.id), 8);
+  assert.equal(s.supplierBalance(supplier.id).payable, 70000);
+  s.command("correct-event", { eventId: returned.id, reason: "Return quantity corrected" });
+  s.command("correct-event", { eventId: payment.id, reason: "Payment entered against wrong invoice" });
+  assert.equal(s.stock(m.id), 10);
+  assert.equal(s.supplierBalance(supplier.id).payable, 100000);
+  assert.throws(() => s.command("correct-event", { eventId: payment.id, reason: "Again" }), /already/);
+  assert.ok(s.events().some((e) => e.kind === "correction" && e.data.originalEventId === returned.id));
+});
+
+test("QR work completion accepts outstanding quantity once and rejects duplicate scans", (t) => {
+  const { s, c, dep, w } = fixture(t);
+  const p = s.command("po", { costId: c.id, quantity: 12, departments: [dep.id], due: today() });
+  const a = s.command("assignment", { poId: p.id, workerId: w.id, departmentId: dep.id, unit: "pair", quantity: 12, rate: 20 });
+  const receipt = s.command("scan-receipt", { code: `SNX1|${a.id}` });
+  assert.equal(receipt.data.accepted, 12);
+  assert.throws(() => s.command("scan-receipt", { code: `SNX1|${a.id}` }), /fully received/);
+  assert.throws(() => s.command("scan-receipt", { code: "BAD|not-an-assignment" }), /Invalid/);
+});
+test('corrections cannot invalidate consumed stock, paid wages or finished output',t=>{
+ const {s,m,p,w,dep}=fixture(t);
+ const stock=s.command('stock',{materialId:m.id,type:'receive',quantity:10,note:'Opening'});
+ s.command('stock',{materialId:m.id,type:'issue',quantity:5,poId:p.id,note:'Used'});
+ assert.throws(()=>s.command('correct-event',{eventId:stock.id,reason:'Wrong receipt'}),/negative/);
+ assert.equal(s.stock(m.id),5);
+ const a=s.command('assignment',{poId:p.id,workerId:w.id,departmentId:dep.id,unit:'pair',quantity:5,rate:20});
+ const r=s.command('receipt',{assignmentId:a.id,accepted:5,rejected:0});
+ s.command('finished',{poId:p.id,quantity:5,note:'Packed'});
+ assert.throws(()=>s.command('correct-event',{eventId:r.id,reason:'Wrong receipt'}),/finished stock/);
+ const daily=s.command('worker',{name:'Correction Daily',basis:'daily',rate:1500});
+ const att=s.command('attendance',{workerId:daily.id,days:1});
+ s.command('settlement',{workerId:daily.id,amount:1500,recovery:0,note:'Paid'});
+ assert.throws(()=>s.command('correct-event',{eventId:att.id,reason:'Wrong day'}),/unpaid earnings/);
+ assert.equal(s.balance(daily.id).payable,0);
+});
+test('corrected attendance can be reposted and invoice stock cannot be reversed alone',t=>{
+ const {s,m}=fixture(t);
+ const w=s.command('worker',{name:'Repost Daily',basis:'daily',rate:1500});
+ const a=s.command('attendance',{workerId:w.id,days:1});
+ s.command('correct-event',{eventId:a.id,reason:'Half day actually'});
+ s.command('attendance',{workerId:w.id,days:0.5});assert.equal(s.balance(w.id).earned,75000);
+ const supplier=s.command('supplier',{name:'Invoice control'});
+ const purchase=s.command('purchase',{supplierId:supplier.id,invoice:'QA-INV',lines:[{materialId:m.id,quantity:2,rate:100}]});
+ const stock=s.events(m.id).find(e=>e.data.purchaseId===purchase.id);
+ assert.throws(()=>s.command('correct-event',{eventId:stock.id,reason:'Wrong purchase'}),/purchase return/);
+ assert.throws(()=>s.command('purchase',{supplierId:supplier.id,invoice:'QA-DUP',lines:[{materialId:m.id,quantity:2,rate:100},{materialId:m.id,quantity:3,rate:200}]}),/one line/);
 });

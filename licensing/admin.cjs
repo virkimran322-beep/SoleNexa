@@ -16,7 +16,9 @@ if(command==='init'){
  const request=JSON.parse(fs.readFileSync(process.argv[3],'utf8'));
  const issuer=new Issuer({file:path.join(root,'issuer.sqlite'),privateKey:fs.readFileSync(path.join(root,'private.pem'),'utf8')});
  try{
-  const issued=issuer.issue({...request,expiresAt:Date.parse(request.expiresAt)});
+  const params={...request};
+  if(request.expiresAt !== undefined) params.expiresAt=Date.parse(request.expiresAt);
+  const issued=issuer.issue(params);
   const {token}=issuer.activate({code:issued.activationCode,deviceId:request.deviceId});
   const out=path.join(root,'issued');fs.mkdirSync(out,{recursive:true});
   fs.writeFileSync(path.join(out,issued.licenseId+'.json'),JSON.stringify(issued,null,2),{mode:0o600});
