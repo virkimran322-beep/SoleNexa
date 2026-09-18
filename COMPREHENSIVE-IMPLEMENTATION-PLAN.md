@@ -31,8 +31,8 @@ This plan is derived from `COMPREHENSIVE-PRODUCT-DOCUMENTATION.md` (version 0.2.
 
 ### Phase 1 — production safety and release readiness
 
-- [ ] D-05: formal numbered transactional migrations with pre-upgrade recovery copy.
-- [ ] D-03: restore validation for schema, references, JSON payloads, business invariants and balances.
+- [x] D-05: formal numbered transactional migrations with pre-upgrade recovery copy.
+- [x] D-03: restore validation for schema, references, JSON payloads, business invariants and balances.
 - [ ] D-04: backup health status, scheduled/post-commit backup, retention and restore drill.
 - [ ] D-02: Windows-protected encryption for sensitive local data and backup archives, with recoverable owner procedure.
 - [ ] D-07: tamper-evident hash chain for high-value audit events.
@@ -98,7 +98,7 @@ The first unchecked implementation item is the formal migration framework. It wi
 4. Reject newer unsupported schemas with a clear message.
 5. Add tests for fresh creation, existing-version upgrade, failed migration rollback and unsupported future versions.
 
-The next slice begins only after this slice passes the full regression and Electron smoke gates.
+The next slice begins with D-04 backup health, scheduled/post-commit retention and restoration-drill improvements; it is not marked complete until the same full regression and Electron smoke gates pass.
 
 ## Required quality gates after every slice
 
