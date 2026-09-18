@@ -1193,6 +1193,9 @@ body.light #toast.error-toast { background:var(--danger-bg); border-color:var(--
 .offline-status { display:flex; align-items:center; gap:8px; }
 .offline-status .dot { width:9px; height:9px; flex:0 0 9px; border-radius:50%; background:var(--green); box-shadow:0 0 0 4px color-mix(in srgb, var(--green) 16%, transparent); }
 .offline-card p { max-width:68ch; line-height:1.55; }
+.backup-health { display:flex; flex-direction:column; gap:4px; margin:14px 0; padding:12px 14px; border:1px solid var(--line); border-left:4px solid var(--green); border-radius:10px; background:var(--surface-soft); }
+.backup-health span { color:var(--muted); font-size:13px; }
+.backup-health.attention { border-left-color:var(--danger); }
 @media (max-width:700px) { .dashboard-hero { align-items:flex-start; flex-direction:column; padding:22px; } .hero-meta { width:100%; justify-content:space-between; } body.light main { padding:20px 16px 30px; } }
 @media (max-width:700px) { .quick-actions { grid-template-columns:1fr; padding:12px; } .quick-action { align-items:flex-start; flex-direction:column; } .quick-action button { width:100%; } }
 

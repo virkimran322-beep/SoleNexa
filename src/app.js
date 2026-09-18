@@ -849,7 +849,7 @@ function settings() {
         ],
         paper,
       )}<p class="hint">Choose the same paper size in your Windows printer driver. Slips open for review before printing.</p></div>`,
-    )}${panel("Protect your factory records", `<div class="panel-body"><p>Automatic backups are kept locally (latest 7 startup/restore copies). Also save a backup to a USB drive regularly, especially after Saturday settlement. The backup contains all costing, production, stock and labour records.</p>${btn("Export database backup", "backup")}${btn("Restore a backup", "restore")}${can("delete-all-data") ? btn("Delete all factory data permanently", "delete-all-data") : ""}<h3>CSV exports</h3><div class="actions">${btn("Materials CSV", "csv-materials")}${btn("Workers CSV", "csv-workers")}${btn("Stock CSV", "csv-stock")}${btn("POs CSV", "csv-pos")}${btn("Ledgers CSV", "csv-ledgers")}</div><p class="hint">Restoring asks for confirmation and first saves your current database as a recovery copy. Permanent deletion requires the factory PIN and exact typed confirmation.</p><div id="data-path" class="hint"></div></div>`)}${panel("Shopify · Online phase", `<div class="panel-body"><p>${badge("Not connected", "amber")}</p><p>The offline edition records factory output and dispatches locally. Live Shopify orders and inventory sync will be added in the online phase.</p><small>Use your Shopify SKU as the article code where possible.</small></div>`)}</div>`
+    )}${panel("Protect your factory records", `<div class="panel-body"><p>Automatic backups stay on this computer and keep the latest seven verified copies. A new copy is created at startup, after restore and shortly after posted changes. Also save a manual backup to USB regularly, especially after Saturday settlement.</p><div id="backup-health" class="backup-health" role="status" aria-live="polite">Checking backup health…</div>${btn("Export database backup", "backup")}${btn("Restore a backup", "restore")}${can("delete-all-data") ? btn("Delete all factory data permanently", "delete-all-data") : ""}<h3>CSV exports</h3><div class="actions">${btn("Materials CSV", "csv-materials")}${btn("Workers CSV", "csv-workers")}${btn("Stock CSV", "csv-stock")}${btn("POs CSV", "csv-pos")}${btn("Ledgers CSV", "csv-ledgers")}</div><p class="hint">Restoring asks for confirmation and first saves your current database as a recovery copy. Permanent deletion requires the factory PIN and exact typed confirmation.</p><div id="data-path" class="hint"></div></div>`)}${panel("Shopify · Online phase", `<div class="panel-body"><p>${badge("Not connected", "amber")}</p><p>The offline edition records factory output and dispatches locally. Live Shopify orders and inventory sync will be added in the online phase.</p><small>Use your Shopify SKU as the article code where possible.</small></div>`)}</div>`
   );
 }
 function profilePage() {
@@ -929,8 +929,15 @@ function render() {
   if (route === "settings")
     call("info")
       .then((i) => {
-        if ($("#data-path"))
+        if ($("#data-path")) {
           $("#data-path").innerHTML = "Database location: " + esc(i.dbPath) + "<br>Automatic backups: " + esc(i.backupDir) + "<br>Safe diagnostics log: " + esc(i.logsDir);
+          const h = i.backupHealth || {};
+          const health = $("#backup-health");
+          if (health) health.className = `backup-health ${h.healthy ? "healthy" : "attention"}`;
+          if (health) health.innerHTML = h.healthy
+            ? `<strong>Backup health: Verified</strong><span>${Number(h.count || 0)} automatic copies retained · Last verified ${esc(h.lastSuccessAt ? new Date(h.lastSuccessAt).toLocaleString("en-PK") : "not available")}</span>`
+            : `<strong>Backup health: Attention required</strong><span>${esc(h.error || "Export a manual backup now.")}</span>`;
+        }
       })
       .catch(() => {});
 }

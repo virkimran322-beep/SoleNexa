@@ -71,6 +71,7 @@ Factory mein configurable departments, piece/daily/salary workers, advances, wee
 - [x] Daily, weekly and monthly factory PDF reports.
 - [x] Database backup export.
 - [x] Numbered transactional schema migration runner with pre-upgrade recovery copies and semantic restore validation.
+- [x] Automatic verified backups after startup, restore and posted changes with seven-copy retention and Settings health status.
 - [x] Validated database restore with pre-restore recovery copy.
 
 ### Phase 1 security and access

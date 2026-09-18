@@ -33,7 +33,7 @@ This plan is derived from `COMPREHENSIVE-PRODUCT-DOCUMENTATION.md` (version 0.2.
 
 - [x] D-05: formal numbered transactional migrations with pre-upgrade recovery copy.
 - [x] D-03: restore validation for schema, references, JSON payloads, business invariants and balances.
-- [ ] D-04: backup health status, scheduled/post-commit backup, retention and restore drill.
+- [x] D-04: backup health status, scheduled/post-commit backup, retention and restore drill foundation.
 - [ ] D-02: Windows-protected encryption for sensitive local data and backup archives, with recoverable owner procedure.
 - [ ] D-07: tamper-evident hash chain for high-value audit events.
 - [ ] D-20: signed installer/release pipeline and clean-device/upgrade acceptance.

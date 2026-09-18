@@ -15,7 +15,9 @@ const paperSize = (width, format) =>
 let store, security, licence,
   win,
   currentUser = null,
-  automaticBackupPath = "";
+  automaticBackupPath = "",
+  automaticBackupTimer = null,
+  automaticBackupHealth = { healthy: false, count: 0, lastSuccessAt: null, lastPath: null, error: "Not checked yet." };
 const entry = path.join(__dirname, "../src/index.html");function safeLog(event, error) {
   try {
     const dir = path.join(app.getPath("userData"), "logs");
@@ -31,7 +33,53 @@ function createAutomaticBackup(database) {
   database.backup(destination);
   const files = fs.readdirSync(dir).filter((name) => /^auto-.*\.sqlite$/.test(name)).map((name) => ({ name, time: fs.statSync(path.join(dir, name)).mtimeMs })).sort((a, b) => b.time - a.time);
   for (const file of files.slice(7)) fs.rmSync(path.join(dir, file.name), { force: true });
+  automaticBackupHealth = {
+    healthy: true,
+    count: Math.min(files.length, 7),
+    lastSuccessAt: new Date().toISOString(),
+    lastPath: destination,
+    error: "",
+  };
   return destination;
+}
+function refreshBackupHealth() {
+  const dir = path.join(app.getPath("userData"), "backups");
+  try {
+    const files = fs.readdirSync(dir)
+      .filter((name) => /^auto-.*\.sqlite$/.test(name))
+      .map((name) => ({ name, path: path.join(dir, name), stat: fs.statSync(path.join(dir, name)) }))
+      .sort((a, b) => b.stat.mtimeMs - a.stat.mtimeMs);
+    if (!files.length) {
+      automaticBackupHealth = { healthy: false, count: 0, lastSuccessAt: null, lastPath: null, error: "No automatic backup has completed yet." };
+      return automaticBackupHealth;
+    }
+    Store.validateBackup(files[0].path);
+    automaticBackupHealth = {
+      healthy: true,
+      count: files.length,
+      lastSuccessAt: files[0].stat.mtime.toISOString(),
+      lastPath: files[0].path,
+      error: "",
+    };
+  } catch (error) {
+    automaticBackupHealth = { ...automaticBackupHealth, healthy: false, error: "Latest automatic backup needs attention." };
+    safeLog("backup-health", error);
+  }
+  return automaticBackupHealth;
+}
+function scheduleAutomaticBackup(reason = "post-commit") {
+  clearTimeout(automaticBackupTimer);
+  automaticBackupTimer = setTimeout(() => {
+    try {
+      if (store) {
+        automaticBackupPath = createAutomaticBackup(store);
+        safeLog(`automatic-backup-${reason}`);
+      }
+    } catch (error) {
+      automaticBackupHealth = { ...automaticBackupHealth, healthy: false, error: "Automatic backup failed. Export a manual backup." };
+      safeLog("automatic-backup-failed", error);
+    }
+  }, 1500);
 }
 process.on("uncaughtException", (error) => {
   safeLog("uncaught-exception", error);
@@ -64,6 +112,7 @@ if (!app.requestSingleInstanceLock()) {
       );
       store = new Store(dbPath);
       automaticBackupPath = createAutomaticBackup(store);
+      refreshBackupHealth();
       safeLog("startup");
       licence = new LicenceManager({file:path.join(app.getPath('userData'),'activation.json')});
       security = new Security(store,Date.now,licence);
@@ -99,7 +148,7 @@ if (!app.requestSingleInstanceLock()) {
           if (!["info","backup","restore","print","pdf","export-csv","whatsapp-share","qr-code"].includes(action)) return {ok:true,data:security.run(action,payload)};
           security.authorize(action, payload);
           if (action === "info")
-            return { ok: true, data: { dbPath, backupDir: path.dirname(automaticBackupPath), logsDir: path.join(app.getPath("userData"), "logs"), version: app.getVersion() } };
+            return { ok: true, data: { dbPath, backupDir: path.dirname(automaticBackupPath), logsDir: path.join(app.getPath("userData"), "logs"), version: app.getVersion(), backupHealth: refreshBackupHealth(), backupRetention: 7 } };
 
           if (action === "export-csv") {
             const kind = String(payload?.kind || "");
@@ -201,7 +250,9 @@ if (!app.requestSingleInstanceLock()) {
             fs.writeFileSync(result.filePath, pdf);
             return { ok: true, data: result.filePath };
           }
-          return { ok: true, data: store.command(action, payload) };
+          const result = store.command(action, payload);
+          if (!['activate','status','snapshot','login','resume-login','logout','unlock-pin','set-pin','create-user','change-password','reset-password','set-user-active','link-worker'].includes(action)) scheduleAutomaticBackup(action);
+          return { ok: true, data: result };
         } catch (e) {
           return { ok: false, error: e.message };
         }

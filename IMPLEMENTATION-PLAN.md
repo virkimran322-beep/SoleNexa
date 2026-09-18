@@ -60,6 +60,7 @@ Offline Windows desktop software for a footwear factory with a Shopify store. Fa
 ### 6. Recovery, delivery and verification
 - [x] Export backup and validated restore with pre-restore backup implemented; backup integrity/persistence covered by tests. Native restore-dialog acceptance remains below.
 - [x] Restore candidates validate SQLite integrity, foreign keys, supported records, event headers/payloads and migration ledger before replacement.
+- [x] Automatic verified backups run at startup, after restore and after posted changes; Settings exposes health, retention count and latest verification time.
 - [x] Core tests: costing, allocation, receipts, stock, attendance, salary, settlement, persistence.
 - [x] UI interaction and visual verification on desktop and narrow viewport.
 - [x] Light-first blue factory ERP redesign with dashboard hero, modern cards, sidebar, tables, forms and responsive states.
