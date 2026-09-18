@@ -120,6 +120,20 @@ test("lot tracked purchases keep stock counts and returns isolated", (t) => {
   assert.equal(count.lotCode, "B-001");
   void second;
 });
+test("stock reservations reduce free stock and are consumed or released by audit events", (t) => {
+  const { s, m, p } = fixture(t);
+  const bin = s.defaultBin();
+  s.command("stock", { materialId: m.id, binId: bin.id, type: "receive", quantity: 10, lotCode: "RES-1", note: "Reserved stock" });
+  const reservation = s.command("reservation", { materialId: m.id, binId: bin.id, quantity: 6, lotCode: "RES-1", date: today(), note: "PO allocation" });
+  assert.equal(s.reservationRemaining(reservation), 6);
+  assert.throws(() => s.command("reservation", { materialId: m.id, binId: bin.id, quantity: 5, lotCode: "RES-1", date: today(), note: "Too much" }), /free stock/);
+  s.command("stock", { materialId: m.id, binId: bin.id, type: "issue", quantity: 3, lotCode: "RES-1", reservationId: reservation.id, poId: p.id, note: "Issue reserved" });
+  assert.equal(s.reservationRemaining(reservation), 3);
+  assert.throws(() => s.command("stock", { materialId: m.id, binId: bin.id, type: "issue", quantity: 5, lotCode: "RES-1", poId: p.id, note: "Would consume reserved stock" }), /reserved stock/);
+  s.command("reservation-release", { id: reservation.id, quantity: 1, note: "Plan reduced" });
+  assert.equal(s.reservationRemaining(reservation), 2);
+  assert.equal(s.events(reservation.id).filter((e) => e.kind === "reservation-release").length, 1);
+});
 function fixture(t) {
   const s = new Store(":memory:");
   t.after(() => s.close());

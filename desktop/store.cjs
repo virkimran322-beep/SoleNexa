@@ -71,6 +71,7 @@ const kinds = [
   "warehouse",
   "bin",
   "lot",
+  "reservation",
   "stock-count",
   "settings",
   "user",
@@ -415,6 +416,16 @@ class Store {
     if (existing) return existing;
     return this.add("lot", { code, materialId: material.id, materialName: material.name, firstReceived: dateValue, active: true });
   }
+  reservationRemaining(reservation) {
+    return round(reservation.quantity - this.events(reservation.id)
+      .filter((e) => ["reservation-release", "reservation-consume"].includes(e.kind))
+      .reduce((sum, e) => sum + e.data.quantity, 0));
+  }
+  reservedAtBin(materialId, binId, lotCode = null, excludeId = null) {
+    return round(this.all("reservation")
+      .filter((r) => r.materialId === materialId && r.binId === binId && active(r) && r.id !== excludeId && (lotCode == null || (r.lotCode || "") === lotCode))
+      .reduce((sum, r) => sum + Math.max(0, this.reservationRemaining(r)), 0));
+  }
   supplierBalance(supplierId) {
     const purchases = this.all("purchase").filter((p) => p.supplierId === supplierId);
     const purchaseTotal = purchases.reduce((sum, p) => sum + p.total, 0);
@@ -757,7 +768,8 @@ class Store {
       check(active(bin) && active(this.get("warehouse", bin.warehouseId)), "Choose an active warehouse bin.");
       const countDate = postedDate(p.date || today());
       const counted = num(p.counted, "Counted quantity");
-      const lotCode = String(p.lotCode || "").trim().slice(0, 80);
+      const selectedReservation = p.reservationId ? this.get("reservation", p.reservationId) : null;
+      const lotCode = String(p.lotCode || selectedReservation?.lotCode || "").trim().slice(0, 80);
       const lot = lotCode ? this.all("lot").find((item) => item.materialId === material.id && item.code.toLowerCase() === lotCode.toLowerCase()) : null;
       check(!lotCode || lot, "Choose an existing lot before counting it.");
       const expected = this.stockAtBinLot(material.id, bin.id, countDate, lot?.code || null);
@@ -770,6 +782,34 @@ class Store {
         expected, counted, variance: round(counted - expected),
         note: String(p.note || "").trim().slice(0, 500), status: "draft",
       });
+    }
+    if (action === "reservation") {
+      const material = this.get("material", p.materialId), bin = this.get("bin", p.binId);
+      check(active(material), "Inactive materials cannot be reserved.");
+      check(active(bin) && active(this.get("warehouse", bin.warehouseId)), "Choose an active warehouse bin.");
+      const quantity = num(p.quantity, "Reserved quantity", 0.000001), dateValue = postedDate(p.date || today());
+      const lotCode = String(p.lotCode || "").trim().slice(0, 80);
+      const lot = lotCode ? this.all("lot").find((item) => item.materialId === material.id && item.code.toLowerCase() === lotCode.toLowerCase()) : null;
+      check(!lotCode || lot, "Choose an existing lot before reserving it.");
+      const expected = this.stockAtBinLot(material.id, bin.id, dateValue, lot?.code || null);
+      const free = expected - this.reservedAtBin(material.id, bin.id, lot?.code || null);
+      check(quantity <= free, "Reservation exceeds free stock in this bin and lot.");
+      const reservation = this.add("reservation", {
+        number: `RES-${String(this.all("reservation").length + 1).padStart(4, "0")}`,
+        date: dateValue, materialId: material.id, materialName: material.name,
+        binId: bin.id, binName: bin.name, warehouseId: bin.warehouseId,
+        lotId: lot?.id || null, lotCode: lot?.code || null,
+        quantity, note: String(p.note || "").trim().slice(0, 500), active: true,
+      });
+      this.event("reservation-create", reservation.id, dateValue, { quantity, note: reservation.note || "Reservation created" });
+      return reservation;
+    }
+    if (action === "reservation-release") {
+      const reservation = this.get("reservation", p.id), remaining = this.reservationRemaining(reservation);
+      check(remaining > 0, "This reservation has no quantity left to release.");
+      const quantity = p.quantity == null || p.quantity === "" ? remaining : num(p.quantity, "Release quantity", 0.000001);
+      check(quantity <= remaining, "Release quantity exceeds the reservation balance.");
+      return this.event("reservation-release", reservation.id, today(), { quantity, note: text(p.note || "Reservation released", "Release reason") });
     }
     if (action === "stock-count-submit") {
       const count = this.get("stock-count", p.id);
@@ -1039,7 +1079,8 @@ class Store {
       const qty = num(p.quantity, "Quantity", 0.000001),
         quantity = ["issue", "adjust-down"].includes(p.type) ? -qty : qty;
       const dtValue = dt();
-      const lotCode = String(p.lotCode || "").trim().slice(0, 80);
+      const selectedReservation = p.reservationId ? this.get("reservation", p.reservationId) : null;
+      const lotCode = String(p.lotCode || selectedReservation?.lotCode || "").trim().slice(0, 80);
       const lot = lotCode ? (p.type === "receive" ? this.ensureLot(material.id, lotCode, dtValue) : this.all("lot").find((item) => item.materialId === material.id && item.code.toLowerCase() === lotCode.toLowerCase())) : null;
       check(!lotCode || lot, "Choose an existing lot for this movement, or receive the lot first.");
       const bin = this.get("bin", p.binId || this.defaultBin().id);
@@ -1072,6 +1113,16 @@ class Store {
           "Return exceeds the net quantity issued to this PO.",
         );
       }
+      if (p.type === "issue") {
+        const reservation = selectedReservation;
+        if (reservation) {
+          check(reservation.materialId === material.id && reservation.binId === bin.id && (reservation.lotCode || "") === (lot?.code || ""), "Selected reservation does not match this material, bin or lot.");
+          const remaining = this.reservationRemaining(reservation);
+          check(qty <= remaining, "Issue quantity exceeds the selected reservation balance.");
+        }
+        const reserved = this.reservedAtBin(material.id, bin.id, lot?.code || null, reservation?.id || null);
+        check(qty <= this.stockAtBinLot(material.id, bin.id, dtValue, lot?.code || null) - reserved, "Not enough stock available; reserved stock must be issued against its reservation.");
+      }
       const future = [
           ...this.events(p.materialId)
             .filter((e) => e.kind === "stock" && (e.data.binId || defaultBinId) === bin.id && (!lotCode || (e.data.lotCode || "") === lot.code))
@@ -1086,7 +1137,7 @@ class Store {
           "Not enough stock on this date. Receive stock first.",
         );
       }
-      return this.event("stock", p.materialId, dtValue, {
+      const movement = this.event("stock", p.materialId, dtValue, {
         quantity,
         type: p.type,
         poId,
@@ -1094,9 +1145,12 @@ class Store {
         warehouseId: bin.warehouseId,
         lotId: lot?.id || null,
         lotCode: lot?.code || null,
+        ...(p.reservationId ? { reservationId: p.reservationId } : {}),
         ...(supplierReceiveId ? { supplierReceiveId } : {}),
         note: text(p.note, "Reference / reason"),
       });
+      if (p.type === "issue" && p.reservationId) this.event("reservation-consume", p.reservationId, dtValue, { quantity: qty, stockEventId: movement.id, note: "Consumed by stock issue." });
+      return movement;
     }
     if (action === "finished" || action === "dispatch") {
       const po = this.get("po", p.poId),
