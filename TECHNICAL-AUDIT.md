@@ -54,7 +54,7 @@ The application keeps the latest seven automatic startup/restore backups. Manual
 
 When a valid local licence is present beside a newly created or reset database, startup reconciles the database activation flag before rendering factory setup. This prevents the setup form from appearing with a false “Activate SoleNexa before factory setup” error.
 
-Backups use SQLite `VACUUM INTO`, integrity/version/foreign-key validation and a pre-restore recovery copy. Restore requires explicit confirmation and restores the current database if the replacement copy fails.
+Backups use SQLite `VACUUM INTO`, integrity/version/foreign-key validation, semantic record/event checks and a pre-restore recovery copy. Restore requires explicit confirmation and restores the current database if the replacement copy fails. The database now has a numbered transactional migration ledger (schema v2); an existing older database receives a `migration-backups` recovery copy before upgrade, and a failed migration is rolled back.
 
 ### Authentication and isolation
 

@@ -28,6 +28,7 @@ Offline Windows desktop software for a footwear factory with a Shopify store. Fa
 ### 2. Offline foundation
 - [x] Electron desktop shell with sandboxed renderer and narrow IPC bridge.
 - [x] Local SQLite database with transactions, foreign keys and schema version.
+- [x] Formal transactional schema migration ledger with pre-upgrade recovery copy and unsupported-version protection.
 - [x] Dashboard/navigation with real empty states, no fake production data.
 - [x] IQ Links animated splash, offline activation gate, first-run factory identity setup and owner sign-in.
 - [x] Local user records with hashed passwords and role choices; fine-grained role enforcement remains a later iteration.
@@ -58,6 +59,7 @@ Offline Windows desktop software for a footwear factory with a Shopify store. Fa
 
 ### 6. Recovery, delivery and verification
 - [x] Export backup and validated restore with pre-restore backup implemented; backup integrity/persistence covered by tests. Native restore-dialog acceptance remains below.
+- [x] Restore candidates validate SQLite integrity, foreign keys, supported records, event headers/payloads and migration ledger before replacement.
 - [x] Core tests: costing, allocation, receipts, stock, attendance, salary, settlement, persistence.
 - [x] UI interaction and visual verification on desktop and narrow viewport.
 - [x] Light-first blue factory ERP redesign with dashboard hero, modern cards, sidebar, tables, forms and responsive states.
@@ -110,3 +112,4 @@ Offline Windows desktop software for a footwear factory with a Shopify store. Fa
 See PHASE-1.md for verified changes and remaining acceptance work. Version 0.2.3 currently uses the owner-requested fixed offline activation key plus validity days, controlled master-data revisions and audited corrections. Public online activation, factory acceptance and printer acceptance remain pending.
 
 - 2026-09-18: Full isolated browser and backend factory-flow audit passed with 53 automated tests. Security, correction dependency, QR receipt, report filtering, PO costing allocation, salary-month default, backup/restore PIN and profile-logo issues found during the audit were fixed.
+- 2026-09-18: Added formal SQLite migration runner (current schema v2), pre-upgrade recovery copies, semantic backup validation and migration rollback/preservation tests. See `COMPREHENSIVE-IMPLEMENTATION-PLAN.md` for the documentation-driven roadmap.

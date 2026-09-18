@@ -70,6 +70,7 @@ Factory mein configurable departments, piece/daily/salary workers, advances, wee
 - [x] Worker account and payment slip PDF/print preview.
 - [x] Daily, weekly and monthly factory PDF reports.
 - [x] Database backup export.
+- [x] Numbered transactional schema migration runner with pre-upgrade recovery copies and semantic restore validation.
 - [x] Validated database restore with pre-restore recovery copy.
 
 ### Phase 1 security and access
@@ -147,6 +148,7 @@ Factory mein configurable departments, piece/daily/salary workers, advances, wee
 - [x] Detailed browser QA verified fresh setup/activation, PIN recovery, fake material/stock/worker/costing/PO/assignment data, all main module routes and forms, dashboard shortcuts, profile editor, theme controls, report preview, CSV export, search empty states and revision history; fixed shared selection, costing-total, PO-detail rendering, Security-layer CSV dispatch, payload-less PIN retry, compact button hit-area, empty supplier-dialog and unfiltered purchase-return material issues found during live preview testing.
 - [x] 2026-09-18 full-flow audit verified supplier invoice/payment, raw stock receive/issue, costing, PO, assignment, accepted/rejected/reworked output, piece/daily/salary earnings, advance recovery, finished stock, dispatch, filtered A4 report and role isolation on a separate QA database.
 - [x] Full-flow fixes cover backup/restore PIN forwarding, false PIN-failure counting, PIN lock after idle expiry, PIN-hash response privacy, correction dependency guards, QR completion-slip scope, logo normalization, previous-month salary default, report filters and PO labour double-counting.
+- [x] Documentation-driven continuation started: formal migration ledger is schema v2; existing data is preserved and failed upgrades roll back safely.
 - [x] Browser-tested Stock movement → Receive stock with a Supplier selected: automatic quantity × current material rate payable preview and supplier ledger posting verified; linked correction reverses both stock and supplier payable.
 - [x] Unauthorized worker escalation is rejected.
 - [x] Renderer has no Node.js exposure.

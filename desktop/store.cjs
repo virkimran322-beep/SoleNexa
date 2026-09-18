@@ -81,6 +81,82 @@ const normalizeActivationKey = (value) =>
     .trim()
     .toUpperCase()
     .replace(/[\u2010-\u2015\s]/g, "-");
+const CURRENT_SCHEMA_VERSION = 2;
+
+function runMigrations(db, fromVersion) {
+  check(Number.isInteger(fromVersion) && fromVersion >= 0, "Invalid database schema version.");
+  check(fromVersion <= CURRENT_SCHEMA_VERSION, "This database needs a newer version of SoleNexa.");
+  if (fromVersion === CURRENT_SCHEMA_VERSION) return;
+
+  db.exec("BEGIN IMMEDIATE");
+  try {
+    let version = fromVersion;
+    if (version < 1) {
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS records(
+          id TEXT PRIMARY KEY,
+          kind TEXT NOT NULL,
+          data TEXT NOT NULL CHECK(json_valid(data))
+        );
+        CREATE TABLE IF NOT EXISTS events(
+          id TEXT PRIMARY KEY,
+          kind TEXT NOT NULL,
+          target TEXT NOT NULL REFERENCES records(id),
+          date TEXT NOT NULL,
+          data TEXT NOT NULL CHECK(json_valid(data)),
+          created TEXT NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS event_target ON events(target,date);
+        DROP INDEX IF EXISTS attendance_once;
+        CREATE UNIQUE INDEX attendance_once ON events(target,date)
+          WHERE kind='attendance'
+            AND json_extract(data,'$.reversalOf') IS NULL
+            AND json_extract(data,'$.correctedBy') IS NULL;
+        CREATE UNIQUE INDEX IF NOT EXISTS salary_once
+          ON events(target,json_extract(data,'$.month')) WHERE kind='salary';
+      `);
+      version = 1;
+      db.exec("PRAGMA user_version=1");
+    }
+    if (version < 2) {
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS schema_migrations(
+          version INTEGER PRIMARY KEY,
+          applied_at TEXT NOT NULL
+        );
+        INSERT OR IGNORE INTO schema_migrations(version, applied_at)
+          VALUES(1, '${new Date().toISOString()}');
+        INSERT INTO schema_migrations(version, applied_at)
+          VALUES(2, '${new Date().toISOString()}');
+        PRAGMA user_version=2;
+      `);
+      version = 2;
+    }
+    check(version === CURRENT_SCHEMA_VERSION, "Database migration did not reach the current version.");
+    db.exec("COMMIT");
+  } catch (error) {
+    try { db.exec("ROLLBACK"); } catch {}
+    throw new Error(`Database migration failed safely: ${error.message}`);
+  }
+}
+
+function migrationRecoveryCopy(db, filename, fromVersion) {
+  if (filename === ":memory:" || fromVersion === 0 || fromVersion >= CURRENT_SCHEMA_VERSION) return null;
+  const backupDir = path.join(path.dirname(filename), "migration-backups");
+  fs.mkdirSync(backupDir, { recursive: true });
+  const stamp = new Date().toISOString().replace(/[:.]/g, "-");
+  const destination = path.join(
+    backupDir,
+    `${path.basename(filename)}.before-v${CURRENT_SCHEMA_VERSION}-${stamp}-${randomUUID().slice(0, 8)}.sqlite`,
+  );
+  try {
+    db.exec(`VACUUM INTO '${destination.replaceAll("'", "''")}'`);
+    return destination;
+  } catch (error) {
+    try { fs.rmSync(destination, { force: true }); } catch {}
+    throw new Error(`Pre-upgrade recovery copy failed: ${error.message}`);
+  }
+}
 
 class Store {
   constructor(filename) {
@@ -89,18 +165,18 @@ class Store {
       fs.mkdirSync(path.dirname(filename), { recursive: true });
     this.db = new DatabaseSync(filename);
     const version = this.db.prepare("PRAGMA user_version").get().user_version;
-    if (version > 1) {
+    if (version > CURRENT_SCHEMA_VERSION) {
       this.db.close();
       throw Error("This database needs a newer version of SoleNexa.");
     }
-    this.db
-      .exec(`PRAGMA foreign_keys=ON; PRAGMA journal_mode=WAL; PRAGMA busy_timeout=5000;
-      CREATE TABLE IF NOT EXISTS records(id TEXT PRIMARY KEY, kind TEXT NOT NULL, data TEXT NOT NULL CHECK(json_valid(data)));
-      CREATE TABLE IF NOT EXISTS events(id TEXT PRIMARY KEY, kind TEXT NOT NULL, target TEXT NOT NULL REFERENCES records(id), date TEXT NOT NULL, data TEXT NOT NULL CHECK(json_valid(data)), created TEXT NOT NULL);
-      CREATE INDEX IF NOT EXISTS event_target ON events(target,date);
-      DROP INDEX IF EXISTS attendance_once; CREATE UNIQUE INDEX attendance_once ON events(target,date) WHERE kind='attendance' AND json_extract(data,'$.reversalOf') IS NULL AND json_extract(data,'$.correctedBy') IS NULL;
-      CREATE UNIQUE INDEX IF NOT EXISTS salary_once ON events(target,json_extract(data,'$.month')) WHERE kind='salary';
-      PRAGMA user_version=1;`);
+    this.db.exec("PRAGMA foreign_keys=ON; PRAGMA journal_mode=WAL; PRAGMA busy_timeout=5000;");
+    try {
+      migrationRecoveryCopy(this.db, filename, version);
+      runMigrations(this.db, version);
+    } catch (error) {
+      this.db.close();
+      throw error;
+    }
     if (!this.all("department").length)
       for (const name of ["Upper", "Bottom", "Insole", "Heel", "Finishing"])
         this.add("department", { name });
@@ -1061,7 +1137,7 @@ class Store {
         "Backup integrity check failed.",
       );
       check(
-        d.prepare("PRAGMA user_version").get().user_version === 1,
+        [1, CURRENT_SCHEMA_VERSION].includes(d.prepare("PRAGMA user_version").get().user_version),
         "Unsupported backup version.",
       );
       for (const table of ["records", "events"])
@@ -1079,12 +1155,34 @@ class Store {
       );
       for (const r of d.prepare("SELECT kind,data FROM records").all())
         check(
-          kinds.includes(r.kind) && typeof JSON.parse(r.data) === "object",
+          kinds.includes(r.kind) && (() => { const value = JSON.parse(r.data); return value && typeof value === "object" && !Array.isArray(value); })(),
           "Invalid backup record.",
         );
+      const version = d.prepare("PRAGMA user_version").get().user_version;
+      if (version >= 2) {
+        check(
+          d.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='schema_migrations'").get(),
+          "Backup migration ledger is missing.",
+        );
+        const migrations = d.prepare("SELECT version FROM schema_migrations ORDER BY version").all().map((row) => row.version);
+        check(migrations.includes(1) && migrations.includes(2), "Backup migration ledger is incomplete.");
+      }
+      for (const e of d.prepare("SELECT kind,target,date,data FROM events").all()) {
+        check(
+          typeof e.kind === "string" && e.kind.length > 0 &&
+            /^\d{4}-\d{2}-\d{2}$/.test(e.date) && !Number.isNaN(Date.parse(e.date)),
+          "Invalid backup event header.",
+        );
+        const value = JSON.parse(e.data);
+        check(value && typeof value === "object" && !Array.isArray(value), "Invalid backup event payload.");
+      }
+      check(
+        d.prepare("SELECT COUNT(*) AS count FROM records WHERE kind='settings'").get().count <= 1,
+        "Backup contains multiple settings records.",
+      );
     } finally {
       d.close();
     }
   }
 }
-module.exports = { Store, today };
+module.exports = { Store, today, CURRENT_SCHEMA_VERSION };

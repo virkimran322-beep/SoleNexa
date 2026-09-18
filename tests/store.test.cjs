@@ -3,19 +3,71 @@ const assert = require("node:assert/strict");
 const fs = require("node:fs"),
   os = require("node:os"),
   path = require("node:path");
-const { Store, today } = require("../desktop/store.cjs");
+const { Store, today, CURRENT_SCHEMA_VERSION } = require("../desktop/store.cjs");
 test("unsupported database version is not silently downgraded", (t) => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "solenexa-version-"));
   t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
   const file = path.join(dir, "future.sqlite");
   const { DatabaseSync } = require("node:sqlite");
   let db = new DatabaseSync(file);
-  db.exec("PRAGMA user_version=2");
+  db.exec(`PRAGMA user_version=${CURRENT_SCHEMA_VERSION + 1}`);
   db.close();
   assert.throws(() => new Store(file), /newer version/);
   db = new DatabaseSync(file);
-  assert.equal(db.prepare("PRAGMA user_version").get().user_version, 2);
+  assert.equal(db.prepare("PRAGMA user_version").get().user_version, CURRENT_SCHEMA_VERSION + 1);
   db.close();
+});
+test("existing schema is migrated transactionally without changing records", (t) => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "solenexa-migration-"));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const file = path.join(dir, "factory.sqlite");
+  let s = new Store(file);
+  const material = s.add("material", { name: "Migration Leather", unit: "yard", rate: 250, reorder: 2 });
+  s.close();
+  const { DatabaseSync } = require("node:sqlite");
+  let db = new DatabaseSync(file);
+  db.exec("DROP TABLE schema_migrations; PRAGMA user_version=1");
+  db.close();
+
+  s = new Store(file);
+  assert.equal(s.get("material", material.id).name, "Migration Leather");
+  assert.equal(s.db.prepare("PRAGMA user_version").get().user_version, CURRENT_SCHEMA_VERSION);
+  assert.deepEqual(
+    s.db.prepare("SELECT version FROM schema_migrations ORDER BY version").all().map((row) => row.version),
+    [1, 2],
+  );
+  s.close();
+  assert.equal(
+    fs.readdirSync(path.join(dir, "migration-backups")).filter((name) => name.endsWith(".sqlite")).length,
+    1,
+  );
+});
+test("failed migration rolls back instead of changing the old schema", (t) => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "solenexa-migration-failure-"));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const file = path.join(dir, "factory.sqlite");
+  const { DatabaseSync } = require("node:sqlite");
+  const db = new DatabaseSync(file);
+  db.exec("CREATE VIEW schema_migrations AS SELECT 1 AS version, 'blocked' AS applied_at; PRAGMA user_version=1");
+  db.close();
+  assert.throws(() => new Store(file), /migration failed safely/);
+  const checkDb = new DatabaseSync(file);
+  assert.equal(checkDb.prepare("PRAGMA user_version").get().user_version, 1);
+  checkDb.close();
+});
+test("backup validation rejects semantically invalid record payloads", (t) => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "solenexa-backup-validation-"));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const file = path.join(dir, "factory.sqlite");
+  const backup = path.join(dir, "invalid.sqlite");
+  const s = new Store(file);
+  s.backup(backup);
+  s.close();
+  const { DatabaseSync } = require("node:sqlite");
+  const db = new DatabaseSync(backup);
+  db.prepare("INSERT INTO records(id,kind,data) VALUES(?,?,?)").run("bad-record", "not-a-kind", "{}");
+  db.close();
+  assert.throws(() => Store.validateBackup(backup), /Invalid backup record/);
 });
 function fixture(t) {
   const s = new Store(":memory:");

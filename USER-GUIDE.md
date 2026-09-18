@@ -66,7 +66,7 @@ Factory setup ke waqt owner 6-digit PIN set karta hai. App close karke dobara kh
 ## Backups and recovery
 Settings → Export database backup. Har Saturday settlement ke baad USB/external storage par naya backup save karein. Existing backup filename overwrite nahi hota—new filename choose karein.
 
-Restore a backup pehle database integrity aur version check karta hai, phir explicit confirmation mangta hai. Restore se pehle current database ki `pre-restore-<timestamp>.sqlite` copy data directory mein save hoti hai. Backup single SQLite file hai. Live database ko app khuli hone par manually copy na karein; in-app Export use karein.
+Restore a backup pehle database integrity, supported version, foreign-key references, record/event payloads aur migration ledger check karta hai, phir explicit confirmation mangta hai. Restore se pehle current database ki `pre-restore-<timestamp>.sqlite` copy data directory mein save hoti hai. App upgrade se pehle purani schema ki recovery copy `data\migration-backups` mein banti hai. Backup single SQLite file hai. Live database ko app khuli hone par manually copy na karein; in-app Export use karein.
 
 ## Pilot boundaries / next steps
 - One local database per computer; multi-computer shared data is planned for the online phase.
