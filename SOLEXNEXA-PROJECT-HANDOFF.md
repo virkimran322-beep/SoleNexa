@@ -1,10 +1,10 @@
 # SoleNexa Project Handoff Plan
 
-Last updated: 2026-09-16
+Last updated: 2026-09-18
 Project: SoleNexa  
 Company branding: IQ Links  
 Repository: https://github.com/virkimran322-beep/SoleNexa.git  
-Latest pushed commit: `a88a95b`  
+Latest pushed commit: pending current D-09 verification
 Workspace: `D:\IQ Links\SoleNexa`
 
 ## How to continue in a new chat
@@ -73,6 +73,7 @@ Factory mein configurable departments, piece/daily/salary workers, advances, wee
 - [x] Numbered transactional schema migration runner with pre-upgrade recovery copies and semantic restore validation.
 - [x] Automatic verified backups after startup, restore and posted changes with seven-copy retention and Settings health status.
 - [x] Warehouse/bin foundation with per-bin stock guards and reviewed stock-count variance adjustments.
+- [x] Purchase landed-cost foundation: discount, freight and tax allocation, historical line valuation snapshots, landed supplier payable and landed-rate returns.
 - [x] Validated database restore with pre-restore recovery copy.
 
 ### Phase 1 security and access

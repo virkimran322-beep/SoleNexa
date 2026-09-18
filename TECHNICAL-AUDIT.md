@@ -74,7 +74,7 @@ The current offline build packages no private licensing credentials. Activation 
 
 ## Test evidence
 
-- 53/53 automated Node tests pass, including a full supplier-to-payroll factory trial, automatic supplier payable on direct stock receipt, offline purchasing, purchase returns, correction balance guards, structured size/colour PO validation, independent variant stock/dispatch guards, audited supplier corrections, QR completion/duplicate-scan guards, PIN-only fast reopen without password storage, fresh-database activation reconciliation, English-only language enforcement and Security-layer CSV dispatch.
+- 60/60 automated Node tests pass, including a full supplier-to-payroll factory trial, automatic supplier payable on direct stock receipt, offline purchasing, landed-cost allocation, purchase returns, correction balance guards, structured size/colour PO validation, independent variant stock/dispatch guards, audited supplier corrections, QR completion/duplicate-scan guards, PIN-only fast reopen without password storage, fresh-database activation reconciliation, English-only language enforcement and Security-layer CSV dispatch.
 - Browser QA also verified A4 report preview, production-condition graph, and visible WhatsApp share action. WhatsApp requires internet only when the owner explicitly chooses to open the external share page; factory data entry remains offline.
 - Licensing, security, lockout, sessions, worker isolation, costing, production, stock, payroll, reversals, CSV safety, persistence and backup tests pass.
 - Electron UI regression passes activation, setup, owner login, worker isolation, accessibility labels, Phase 2C controls, 800px overflow and narrow-layout checks.
@@ -85,6 +85,8 @@ The current offline build packages no private licensing credentials. Activation 
 - Warehouse/bin foundation now gives every stock movement a controlled bin (legacy movements map to Main stock), isolates negative-stock guards per bin, and supports draft → submitted → approved stock counts with audited variance events. Lot/batch, reservations, transfers and multi-line counts remain future sub-phases.
 - Offline Phase 1 dashboard usability polish adds context-aware Quick Actions and a clear local-data safety card; no network or synchronization dependency was introduced.
 - Stock receive now optionally links an active supplier and posts the automatic material-rate payable as an audited supplier-receive event; purchase-linked receipts remain unchanged to prevent double counting.
+- Purchase records now preserve subtotal, discount, freight, tax, landed total, line-level landed amount and landed rate snapshots. Supplier payable is based on the landed total, and purchase returns reverse the landed rate. The Settings page keeps the final inventory valuation method visibly unconfigured until the owner/accountant approves weighted average, FIFO or another policy; no silent valuation assumption is made.
+- The 2026-09-18 landed-cost regression covers proportional allocation, rounding residuals, supplier payable totals, landed-rate returns and historical line valuation without changing older purchase records.
 - Desktop smoke test passes IPC, activation gate, sandboxed renderer and startup behavior.
 - Windows x64 NSIS and portable artifacts rebuild successfully with the square SoleNexa icon and branded installer artwork.
 

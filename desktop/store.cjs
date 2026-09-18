@@ -198,10 +198,11 @@ class Store {
         owner: "",
         rememberedUserId: "",
         language: "en",
+        inventoryValuation: "unconfigured",
       });
     const settings = this.config();
-    if (settings && (settings.themeVersion !== 2 || settings.theme !== "light" || !["en", "ur"].includes(settings.language))) {
-      const migrated = { ...settings, theme: "light", themeVersion: settings.themeVersion || 2, language: "en" };
+    if (settings && (settings.themeVersion !== 2 || settings.theme !== "light" || !["en", "ur"].includes(settings.language) || !settings.inventoryValuation)) {
+      const migrated = { ...settings, theme: "light", themeVersion: settings.themeVersion || 2, language: "en", inventoryValuation: settings.inventoryValuation || "unconfigured" };
       this.db.prepare("UPDATE records SET data=? WHERE id=?").run(JSON.stringify(migrated), migrated.id);
     }
     if (!this.all("warehouse").length) {
@@ -681,8 +682,20 @@ class Store {
         const quantity = num(line.quantity, "Quantity", 0.000001), rate = cents(line.rate);
         return { materialId: material.id, name: material.name, unit: material.unit, quantity, rate, amount: safeMoney(Math.round(quantity * rate)) };
       });
-      const purchase = this.add("purchase", { number: `PUR-${String(this.all("purchase").length + 1).padStart(4, "0")}`, supplierId: supplier.id, supplierName: supplier.name, invoice, date: dt(), lines, total: safeMoney(lines.reduce((sum, line) => sum + line.amount, 0)), notes: String(p.note || "").slice(0, 500) });
-      for (const line of lines) this.event("stock", line.materialId, purchase.date, { quantity: line.quantity, type: "receive", purchaseId: purchase.id, invoice, note: `Purchase ${purchase.number} · ${invoice}` });
+      const subtotal = lines.reduce((sum, line) => sum + line.amount, 0);
+      const discount = cents(p.discount || 0), freight = cents(p.freight || 0), tax = cents(p.tax || 0);
+      check(discount <= subtotal, "Discount cannot exceed the material subtotal.");
+      const landedTotal = safeMoney(subtotal - discount + freight + tax);
+      const allocation = freight + tax - discount;
+      let allocated = 0;
+      const landedLines = lines.map((line, index) => {
+        const share = index === lines.length - 1 ? allocation - allocated : Math.round(allocation * line.amount / subtotal);
+        allocated += share;
+        const landedAmount = safeMoney(line.amount + share);
+        return { ...line, landedAmount, landedRate: round(landedAmount / line.quantity) };
+      });
+      const purchase = this.add("purchase", { number: `PUR-${String(this.all("purchase").length + 1).padStart(4, "0")}`, supplierId: supplier.id, supplierName: supplier.name, invoice, date: dt(), lines: landedLines, subtotal, discount, freight, tax, total: landedTotal, valuationMethod: "landed-cost", notes: String(p.note || "").slice(0, 500) });
+      for (const line of landedLines) this.event("stock", line.materialId, purchase.date, { quantity: line.quantity, type: "receive", purchaseId: purchase.id, invoice, valuationRate: line.landedRate, valuationAmount: line.landedAmount, note: `Purchase ${purchase.number} · ${invoice}` });
       return purchase;
     }
     if (action === "purchase-return") {
@@ -695,9 +708,10 @@ class Store {
       check(dtValue >= purchase.date, "Return date cannot be before the purchase date.");
       const material = this.get("material", materialId), currentStock = this.stock(material.id);
       check(quantity <= currentStock, "Cannot return more than current stock. Issue or adjust the remaining stock first.");
-      const amount = safeMoney(Math.round(quantity * line.rate));
-      const returnedEvent = this.event("purchase-return", material.id, dtValue, { purchaseId: purchase.id, supplierId: purchase.supplierId, materialId: material.id, quantity, amount, note: text(p.note, "Return reason") });
-      this.event("stock", material.id, dtValue, { quantity: -quantity, type: "purchase-return", purchaseId: purchase.id, purchaseReturnId: returnedEvent.id, note: `Purchase return · ${purchase.invoice}` });
+      const valuationRate = line.landedRate ?? line.rate;
+      const amount = safeMoney(Math.round(quantity * valuationRate));
+      const returnedEvent = this.event("purchase-return", material.id, dtValue, { purchaseId: purchase.id, supplierId: purchase.supplierId, materialId: material.id, quantity, amount, valuationRate, note: text(p.note, "Return reason") });
+      this.event("stock", material.id, dtValue, { quantity: -quantity, type: "purchase-return", purchaseId: purchase.id, purchaseReturnId: returnedEvent.id, valuationRate, valuationAmount: amount, note: `Purchase return · ${purchase.invoice}` });
       return returnedEvent;
     }
     if (action === "supplier-payment") {

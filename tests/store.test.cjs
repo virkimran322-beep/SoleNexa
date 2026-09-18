@@ -540,6 +540,31 @@ test("offline purchasing receives materials and tracks supplier payable", (t) =>
   assert.throws(() => s.command("purchase", { supplierId: supplier.id, invoice: "INV-1001", date: today(), lines: [{ materialId: m.id, quantity: 1, rate: 120 }] }), /invoice/);
 });
 
+test("purchase landed cost allocates discount freight and tax into historical line valuation", (t) => {
+  const { s, m } = fixture(t);
+  const supplier = s.command("supplier", { name: "Landed Cost Supplier" });
+  const purchase = s.command("purchase", {
+    supplierId: supplier.id,
+    invoice: "LAND-1",
+    date: today(),
+    lines: [{ materialId: m.id, quantity: 10, rate: 100 }],
+    discount: 5,
+    freight: 10,
+    tax: 9,
+  });
+  assert.equal(purchase.subtotal, 100000);
+  assert.equal(purchase.discount, 500);
+  assert.equal(purchase.freight, 1000);
+  assert.equal(purchase.tax, 900);
+  assert.equal(purchase.total, 101400);
+  assert.equal(purchase.lines[0].landedAmount, 101400);
+  assert.equal(purchase.lines[0].landedRate, 10140);
+  assert.equal(s.events(m.id).find((e) => e.data.purchaseId === purchase.id).data.valuationRate, 10140);
+  assert.equal(s.supplierBalance(supplier.id).payable, 101400);
+  const returned = s.command("purchase-return", { purchaseId: purchase.id, materialId: m.id, quantity: 2, date: today(), note: "Landed return" });
+  assert.equal(returned.data.amount, 20280);
+});
+
 test("stock receive can post an automatic supplier payable at the material rate", (t) => {
   const { s, m } = fixture(t);
   const supplier = s.command("supplier", { name: "Direct Receipt Supplier" });

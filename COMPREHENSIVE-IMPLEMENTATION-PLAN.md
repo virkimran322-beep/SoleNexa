@@ -45,7 +45,8 @@ Exit: a clean Windows x64 device can install, activate, operate, back up, restor
 
 - [x] D-08: warehouse/bin foundation, per-bin stock guards, physical stock count and approval workflow.
 - [ ] D-08 follow-up: lot/batch traceability, reservations, transfers and multi-line count sheets.
-- [ ] D-09: landed cost, freight/discount/tax policy hooks and valuation controls.
+- [x] D-09 foundation: purchase landed-cost snapshots with discount, freight and tax allocation, supplier payable totals and landed-rate returns.
+- [ ] D-09 follow-up: accountant-approved weighted-average/FIFO valuation policy, period close and valuation reports.
 - [ ] D-10: BOM suggestions, planned-versus-actual consumption, WIP and scrap.
 - [ ] D-11: incoming, in-process and final quality inspection with defect/disposition workflow.
 - [ ] Production board, department queues, routing and controlled work transfer.
