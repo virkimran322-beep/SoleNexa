@@ -94,6 +94,32 @@ test("stock count approval rejects stale stock and preserves the count for revie
   assert.equal(s.get("stock-count", count.id).status, "submitted");
   assert.equal(s.stockAtBin(m.id, bin.id), 5);
 });
+test("multi-line stock count approves all lines atomically", (t) => {
+  const { s, m } = fixture(t);
+  const warehouse = s.all("warehouse")[0];
+  const secondBin = s.command("bin", { warehouseId: warehouse.id, code: "PACK", name: "Packing stock" });
+  const secondMaterial = s.add("material", { name: "Test Sole", unit: "pcs", rate: 25, reorder: 2 });
+  s.command("stock", { materialId: m.id, binId: s.defaultBin().id, type: "receive", quantity: 10, note: "Leather stock" });
+  s.command("stock", { materialId: secondMaterial.id, binId: secondBin.id, type: "receive", quantity: 6, note: "Sole stock" });
+  const sheet = s.command("stock-count", { date: today(), note: "Monthly physical count", lines: [
+    { materialId: m.id, binId: s.defaultBin().id, counted: 8 },
+    { materialId: secondMaterial.id, binId: secondBin.id, counted: 7 },
+  ] });
+  assert.equal(sheet.lines.length, 2);
+  assert.equal(sheet.lines[0].variance, -2);
+  assert.equal(sheet.lines[1].variance, 1);
+  s.command("stock-count-submit", { id: sheet.id });
+  const approved = s.command("stock-count-approve", { id: sheet.id });
+  assert.equal(approved.status, "approved");
+  assert.equal(approved.adjustmentEventIds.length, 2);
+  assert.equal(s.stockAtBin(m.id, s.defaultBin().id), 8);
+  assert.equal(s.stockAtBin(secondMaterial.id, secondBin.id), 7);
+  assert.equal(s.events(m.id).filter((e) => e.kind === "stock" && e.data.stockCountId === sheet.id).length, 1);
+  assert.throws(() => s.command("stock-count", { date: today(), lines: [
+    { materialId: m.id, binId: s.defaultBin().id, counted: 8 },
+    { materialId: m.id, binId: s.defaultBin().id, counted: 8 },
+  ] }), /appears more than once/);
+});
 test("stock movement guards are isolated per bin", (t) => {
   const { s, m, p } = fixture(t);
   const warehouse = s.all("warehouse")[0];

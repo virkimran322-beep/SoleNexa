@@ -765,24 +765,35 @@ class Store {
       return this.add("bin", { warehouseId: warehouse.id, code, name, active: true });
     }
     if (action === "stock-count") {
-      const material = this.get("material", p.materialId);
-      const bin = this.get("bin", p.binId);
-      check(active(material), "Inactive materials cannot be counted.");
-      check(active(bin) && active(this.get("warehouse", bin.warehouseId)), "Choose an active warehouse bin.");
       const countDate = postedDate(p.date || today());
-      const counted = num(p.counted, "Counted quantity");
-      const selectedReservation = p.reservationId ? this.get("reservation", p.reservationId) : null;
-      const lotCode = String(p.lotCode || selectedReservation?.lotCode || "").trim().slice(0, 80);
-      const lot = lotCode ? this.all("lot").find((item) => item.materialId === material.id && item.code.toLowerCase() === lotCode.toLowerCase()) : null;
-      check(!lotCode || lot, "Choose an existing lot before counting it.");
-      const expected = this.stockAtBinLot(material.id, bin.id, countDate, lot?.code || null);
-      check(!this.all("stock-count").some((c) => (c.status === "draft" || c.status === "submitted") && c.materialId === material.id && c.binId === bin.id && (c.lotCode || "") === (lot?.code || "")), "Finish the existing count for this material, bin and lot first.");
+      const rawLines = Array.isArray(p.lines) && p.lines.length ? p.lines : [{ materialId: p.materialId, binId: p.binId, lotCode: p.lotCode, counted: p.counted }];
+      check(rawLines.length <= 200, "A stock count sheet cannot contain more than 200 lines.");
+      const seen = new Set();
+      const lines = rawLines.map((raw, index) => {
+        const material = this.get("material", raw.materialId);
+        const bin = this.get("bin", raw.binId);
+        check(active(material), `Line ${index + 1}: inactive materials cannot be counted.`);
+        check(active(bin) && active(this.get("warehouse", bin.warehouseId)), `Line ${index + 1}: choose an active warehouse bin.`);
+        const counted = num(raw.counted, `Line ${index + 1} counted quantity`);
+        const selectedReservation = raw.reservationId ? this.get("reservation", raw.reservationId) : null;
+        const lotCode = String(raw.lotCode || selectedReservation?.lotCode || "").trim().slice(0, 80);
+        const lot = lotCode ? this.all("lot").find((item) => item.materialId === material.id && item.code.toLowerCase() === lotCode.toLowerCase()) : null;
+        check(!lotCode || lot, `Line ${index + 1}: choose an existing lot before counting it.`);
+        const key = `${material.id}|${bin.id}|${lot?.code || ""}`;
+        check(!seen.has(key), `Line ${index + 1}: the same material, bin and lot appears more than once.`);
+        seen.add(key);
+        check(!this.all("stock-count").some((c) => (c.status === "draft" || c.status === "submitted") && (c.lines || [{ materialId: c.materialId, binId: c.binId, lotCode: c.lotCode }]).some((existing) => existing.materialId === material.id && existing.binId === bin.id && (existing.lotCode || "") === (lot?.code || ""))), `Line ${index + 1}: finish the existing count for this material, bin and lot first.`);
+        const expected = this.stockAtBinLot(material.id, bin.id, countDate, lot?.code || null);
+        return { materialId: material.id, materialName: material.name, binId: bin.id, binName: bin.name, warehouseId: bin.warehouseId, lotId: lot?.id || null, lotCode: lot?.code || null, expected, counted, variance: round(counted - expected) };
+      });
+      check(lines.length > 0, "Add at least one stock count line.");
+      const first = lines[0];
       return this.add("stock-count", {
         number: `COUNT-${String(this.all("stock-count").length + 1).padStart(4, "0")}`,
-        date: countDate, materialId: material.id, materialName: material.name,
-        binId: bin.id, binName: bin.name, warehouseId: bin.warehouseId,
-        lotId: lot?.id || null, lotCode: lot?.code || null,
-        expected, counted, variance: round(counted - expected),
+        date: countDate, materialId: first.materialId, materialName: first.materialName,
+        binId: first.binId, binName: first.binName, warehouseId: first.warehouseId,
+        lotId: first.lotId, lotCode: first.lotCode,
+        expected: first.expected, counted: first.counted, variance: first.variance, lines,
         note: String(p.note || "").trim().slice(0, 500), status: "draft",
       });
     }
@@ -858,11 +869,14 @@ class Store {
       const count = this.get("stock-count", p.id);
       check(count.status === "submitted", "Only a submitted stock count can be approved.");
       check(count.date === today(), "Only a same-day stock count can be approved safely.");
-      const current = this.stockAtBinLot(count.materialId, count.binId, count.date, count.lotCode || null);
-      check(round(current) === round(count.expected), "Stock changed after this count. Start a new count before approval.");
-      check(round(current + count.variance) >= 0, "Count adjustment cannot make the bin stock negative.");
-      const movement = this.event("stock", count.materialId, count.date, { quantity: count.variance, type: "count-adjustment", binId: count.binId, warehouseId: count.warehouseId, lotId: count.lotId, lotCode: count.lotCode, stockCountId: count.id, note: `Approved ${count.number}${count.note ? ` · ${count.note}` : ""}` });
-      const next = { ...count, status: "approved", approvedAt: new Date().toISOString(), adjustmentEventId: movement.id };
+      const lines = count.lines || [{ materialId: count.materialId, materialName: count.materialName, binId: count.binId, binName: count.binName, warehouseId: count.warehouseId, lotId: count.lotId, lotCode: count.lotCode, expected: count.expected, counted: count.counted, variance: count.variance }];
+      const movements = lines.map((line, index) => {
+        const current = this.stockAtBinLot(line.materialId, line.binId, count.date, line.lotCode || null);
+        check(round(current) === round(line.expected), `Stock changed on line ${index + 1}. Start a new count before approval.`);
+        check(round(current + line.variance) >= 0, `Count adjustment on line ${index + 1} cannot make the bin stock negative.`);
+        return this.event("stock", line.materialId, count.date, { quantity: line.variance, type: "count-adjustment", binId: line.binId, warehouseId: line.warehouseId, lotId: line.lotId, lotCode: line.lotCode, stockCountId: count.id, stockCountLine: index + 1, note: `Approved ${count.number} line ${index + 1}${count.note ? ` · ${count.note}` : ""}` });
+      });
+      const next = { ...count, lines, status: "approved", approvedAt: new Date().toISOString(), adjustmentEventIds: movements.map((movement) => movement.id), adjustmentEventId: movements[0]?.id || null };
       this.db.prepare("UPDATE records SET data=? WHERE id=?").run(JSON.stringify(next), next.id);
       return next;
     }

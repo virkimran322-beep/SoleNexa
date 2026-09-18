@@ -76,6 +76,7 @@ Factory mein configurable departments, piece/daily/salary workers, advances, wee
 - [x] Optional lot/batch traceability for purchases, stock movements, returns and reviewed stock counts; legacy untracked stock remains compatible.
 - [x] Offline stock reservations with free-stock guards and audited consume/release events.
 - [x] Offline warehouse transfers between active bins with atomic linked events, optional lot identity and reserved-stock protection.
+- [x] Multi-line offline stock count sheets with reviewed atomic approval and stale/duplicate-line guards.
 - [x] Purchase landed-cost foundation: discount, freight and tax allocation, historical line valuation snapshots, landed supplier payable and landed-rate returns.
 - [x] Validated database restore with pre-restore recovery copy.
 
@@ -209,7 +210,7 @@ How to implement:
 - [x] Add CSV export for materials, workers, stock, POs and ledgers.
 - [x] Add pagination for large history tables.
 - [x] Warehouse lot/batch traceability, reservations and atomic transfers are implemented.
-- [ ] Multi-line stock count sheets remain a future operational sub-phase.
+- [x] Multi-line stock count sheets are implemented; future enhancement is richer line-level review UI.
 - [x] Add report filters for department, worker, PO and date range.
 - [ ] Add native backup/restore file-dialog acceptance on a physical computer.
 

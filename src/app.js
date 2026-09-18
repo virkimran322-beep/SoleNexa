@@ -791,7 +791,7 @@ function inventory() {
     ) +
     panel(
       "Warehouse stock counts",
-      `<div class="panel-body"><p class="hint">Count one material in a bin, optionally by lot, submit it for review, then an Owner or Manager can approve the variance. Approval creates an audited stock adjustment; original movements remain unchanged.</p>${state["stock-count"].length ? table(["Count","Material","Lot","Bin","System","Counted","Variance","Status","Action"], state["stock-count"].toReversed().map((c) => `<tr><td>${esc(c.number)}<small>${esc(c.date)}</small></td><td>${esc(c.materialName)}</td><td>${esc(c.lotCode || "Untracked")}</td><td>${esc(c.binName)}</td><td>${qty(c.expected)}</td><td>${qty(c.counted)}</td><td>${badge((c.variance >= 0 ? "+" : "") + qty(c.variance), c.variance === 0 ? "green" : "amber")}</td><td>${badge(c.status, c.status === "approved" ? "green" : c.status === "submitted" ? "amber" : "")}</td><td>${c.status === "draft" && can("stock-count-submit") ? btn("Submit", "stock-count-submit", c.id) : c.status === "submitted" && can("stock-count-approve") ? btn("Approve", "stock-count-approve", c.id, true) + btn("Reject", "stock-count-reject", c.id) : c.rejectionReason ? esc(c.rejectionReason) : "—"}</td></tr>`)) : '<p class="muted">No stock counts recorded yet.</p>'}</div>`,
+      `<div class="panel-body"><p class="hint">Each stock count sheet can contain several material/bin/lot lines. Submit it for review, then an Owner or Manager can approve all variances together. Approval creates audited stock adjustments; original movements remain unchanged.</p>${state["stock-count"].length ? table(["Count","Material","Lot","Bin","System","Counted","Variance","Status","Action"], state["stock-count"].toReversed().map((c) => `<tr><td>${esc(c.number)}<small>${esc(c.date)}</small></td><td>${esc(c.materialName)}${c.lines?.length > 1 ? `<small>+ ${c.lines.length - 1} more line(s)</small>` : ""}</td><td>${esc(c.lotCode || "Untracked")}</td><td>${esc(c.binName)}</td><td>${qty(c.expected)}</td><td>${qty(c.counted)}</td><td>${badge((c.variance >= 0 ? "+" : "") + qty(c.variance), c.variance === 0 ? "green" : "amber")}</td><td>${badge(c.status, c.status === "approved" ? "green" : c.status === "submitted" ? "amber" : "")}</td><td>${c.status === "draft" && can("stock-count-submit") ? btn("Submit", "stock-count-submit", c.id) : c.status === "submitted" && can("stock-count-approve") ? btn("Approve all", "stock-count-approve", c.id, true) + btn("Reject", "stock-count-reject", c.id) : c.rejectionReason ? esc(c.rejectionReason) : "—"}</td></tr>`)) : '<p class="muted">No stock counts recorded yet.</p>'}</div>`,
     ) +
     panel(
       "Warehouse and bin register",
@@ -1121,6 +1121,9 @@ function costLine() {
 function purchaseLine() {
   return `<div class="line-item purchase-line">${materialSelect()}${number("quantity", "Received quantity", 1, "0.000001", 0.000001)}${number("rate", "Rate / unit (Rs)", 0)}${input("lotCode", "Lot / batch (optional)", "text", "", 'maxlength="80"').replace(" required", "")}${btn("Remove", "remove-line")}</div>`;
 }
+function stockCountLine() {
+  return `<div class="line-item stock-count-line">${materialSelect()}${binSelect()}${input("lotCode", "Lot / batch (optional)", "text", "", 'maxlength="80"').replace(" required", "")}${number("counted", "Physical quantity", 0, "0.000001", 0)}${btn("Remove", "remove-line")}</div>`;
+}
 function variantLine() {
   return `<div class="line-item variant-line">${input("variantSize", "Size", "text", "", 'maxlength="30"').replace(" required", "")}${input("variantColor", "Colour", "text", "", 'maxlength="50"').replace(" required", "")}${number("variantQuantity", "Pairs", 1, "1", 1).replace(" required", "")}${btn("Remove", "remove-line")}</div>`;
 }
@@ -1320,7 +1323,11 @@ function form(action, id) {
   if (action === "stock-count") {
     requireRecords("material", "Add materials before starting a stock count.");
     title = "Start stock count";
-    fields = materialSelect() + binSelect() + input("lotCode", "Lot / batch (optional)", "text", "", 'maxlength="80"').replace(" required", "") + number("counted", "Physical counted quantity", 0, "0.000001", 0) + dates() + note("Count note (optional)") + '<p class="hint full">The system quantity is captured now. If a lot is entered, only that lot is counted. Submit this draft for Owner/Manager review; approval posts only the variance.</p>';
+    fields = '<div class="full"><h3>Count lines</h3><p class="hint">Add each material/bin/lot once. The system quantity is captured when you save the sheet.</p><div id="stock-count-lines">' + stockCountLine() + '</div>' + btn("+ Add count line", "add-stock-count-line") + '</div>' + dates() + note("Count note (optional)") + '<p class="hint full">Submit the complete sheet for Owner/Manager review. Approval posts all line variances together.</p>';
+    save = (p) => {
+      p.lines = [...document.querySelectorAll(".stock-count-line")].map((row) => Object.fromEntries([...row.querySelectorAll("input,select")].map((el) => [el.name, el.value])));
+      return call(action, p);
+    };
   }
   if (["finished", "dispatch"].includes(action)) {
     requireRecords("po", "Create a PO first.");
@@ -1711,6 +1718,10 @@ document.addEventListener("click", async (e) => {
     }
     if (action === "add-purchase-line") {
       $("#purchase-lines").insertAdjacentHTML("beforeend", purchaseLine());
+      return updateForm();
+    }
+    if (action === "add-stock-count-line") {
+      $("#stock-count-lines").insertAdjacentHTML("beforeend", stockCountLine());
       return updateForm();
     }
     if (action === "add-variant-line") {
