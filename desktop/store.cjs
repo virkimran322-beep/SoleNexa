@@ -68,6 +68,9 @@ const kinds = [
   "assignment",
   "supplier",
   "purchase",
+  "warehouse",
+  "bin",
+  "stock-count",
   "settings",
   "user",
 ];
@@ -200,6 +203,13 @@ class Store {
     if (settings && (settings.themeVersion !== 2 || settings.theme !== "light" || !["en", "ur"].includes(settings.language))) {
       const migrated = { ...settings, theme: "light", themeVersion: settings.themeVersion || 2, language: "en" };
       this.db.prepare("UPDATE records SET data=? WHERE id=?").run(JSON.stringify(migrated), migrated.id);
+    }
+    if (!this.all("warehouse").length) {
+      const warehouse = this.add("warehouse", { code: "MAIN", name: "Main warehouse", active: true });
+      this.add("bin", { warehouseId: warehouse.id, code: "MAIN", name: "Main stock", active: true });
+    } else if (!this.all("bin").length) {
+      const warehouse = this.all("warehouse")[0];
+      this.add("bin", { warehouseId: warehouse.id, code: "MAIN", name: "Main stock", active: true });
     }
   }
   close() {
@@ -371,10 +381,23 @@ class Store {
       advanceDue: advance - recovered,
     };
   }
-  stock(id) {
+  defaultBin() {
+    const bin = this.all("bin").find((item) => active(item));
+    check(bin, "Create an active stock bin first.");
+    return bin;
+  }
+  stockAtBin(materialId, binId, until = "9999-12-31") {
+    const defaultBinId = this.defaultBin().id;
+    return round(
+      this.events(materialId)
+        .filter((e) => e.kind === "stock" && e.date <= until && (e.data.binId || defaultBinId) === binId)
+        .reduce((s, e) => s + e.data.quantity, 0),
+    );
+  }
+  stock(id, until = "9999-12-31") {
     return round(
       this.events(id)
-        .filter((e) => e.kind === "stock")
+        .filter((e) => e.kind === "stock" && e.date <= until)
         .reduce((s, e) => s + e.data.quantity, 0),
     );
   }
@@ -684,6 +707,63 @@ class Store {
       check(amount <= balance.payable, "Supplier payment exceeds outstanding payable.");
       return this.event("supplier-payment", supplier.id, dt(), { amount, note: text(p.note, "Payment reference") });
     }
+    if (action === "warehouse") {
+      const code = text(p.code, "Warehouse code").toUpperCase();
+      const name = text(p.name, "Warehouse name");
+      check(!this.all("warehouse").some((w) => w.code === code), "Warehouse code already exists.");
+      return this.add("warehouse", { code, name, active: true });
+    }
+    if (action === "bin") {
+      const warehouse = this.get("warehouse", p.warehouseId);
+      check(active(warehouse), "Inactive warehouses cannot receive new bins.");
+      const code = text(p.code, "Bin code").toUpperCase();
+      const name = text(p.name, "Bin name");
+      check(!this.all("bin").some((b) => b.warehouseId === warehouse.id && b.code === code), "Bin code already exists in this warehouse.");
+      return this.add("bin", { warehouseId: warehouse.id, code, name, active: true });
+    }
+    if (action === "stock-count") {
+      const material = this.get("material", p.materialId);
+      const bin = this.get("bin", p.binId);
+      check(active(material), "Inactive materials cannot be counted.");
+      check(active(bin) && active(this.get("warehouse", bin.warehouseId)), "Choose an active warehouse bin.");
+      const countDate = postedDate(p.date || today());
+      const counted = num(p.counted, "Counted quantity");
+      const expected = this.stockAtBin(material.id, bin.id, countDate);
+      check(!this.all("stock-count").some((c) => (c.status === "draft" || c.status === "submitted") && c.materialId === material.id && c.binId === bin.id), "Finish the existing count for this material and bin first.");
+      return this.add("stock-count", {
+        number: `COUNT-${String(this.all("stock-count").length + 1).padStart(4, "0")}`,
+        date: countDate, materialId: material.id, materialName: material.name,
+        binId: bin.id, binName: bin.name, warehouseId: bin.warehouseId,
+        expected, counted, variance: round(counted - expected),
+        note: String(p.note || "").trim().slice(0, 500), status: "draft",
+      });
+    }
+    if (action === "stock-count-submit") {
+      const count = this.get("stock-count", p.id);
+      check(count.status === "draft", "Only a draft stock count can be submitted.");
+      const next = { ...count, status: "submitted", submittedAt: new Date().toISOString() };
+      this.db.prepare("UPDATE records SET data=? WHERE id=?").run(JSON.stringify(next), next.id);
+      return next;
+    }
+    if (action === "stock-count-reject") {
+      const count = this.get("stock-count", p.id);
+      check(count.status === "submitted", "Only a submitted stock count can be rejected.");
+      const next = { ...count, status: "rejected", rejectionReason: text(p.reason, "Rejection reason"), rejectedAt: new Date().toISOString() };
+      this.db.prepare("UPDATE records SET data=? WHERE id=?").run(JSON.stringify(next), next.id);
+      return next;
+    }
+    if (action === "stock-count-approve") {
+      const count = this.get("stock-count", p.id);
+      check(count.status === "submitted", "Only a submitted stock count can be approved.");
+      check(count.date === today(), "Only a same-day stock count can be approved safely.");
+      const current = this.stockAtBin(count.materialId, count.binId, count.date);
+      check(round(current) === round(count.expected), "Stock changed after this count. Start a new count before approval.");
+      check(round(current + count.variance) >= 0, "Count adjustment cannot make the bin stock negative.");
+      const movement = this.event("stock", count.materialId, count.date, { quantity: count.variance, type: "count-adjustment", binId: count.binId, warehouseId: count.warehouseId, stockCountId: count.id, note: `Approved ${count.number}${count.note ? ` · ${count.note}` : ""}` });
+      const next = { ...count, status: "approved", approvedAt: new Date().toISOString(), adjustmentEventId: movement.id };
+      this.db.prepare("UPDATE records SET data=? WHERE id=?").run(JSON.stringify(next), next.id);
+      return next;
+    }
     if (action === "department") {
       const name = text(p.name, "Department name");
       check(
@@ -926,6 +1006,9 @@ class Store {
       const qty = num(p.quantity, "Quantity", 0.000001),
         quantity = ["issue", "adjust-down"].includes(p.type) ? -qty : qty;
       const dtValue = dt();
+      const bin = this.get("bin", p.binId || this.defaultBin().id);
+      check(active(bin) && active(this.get("warehouse", bin.warehouseId)), "Choose an active warehouse bin.");
+      const defaultBinId = this.defaultBin().id;
       let poId = null;
       let supplierReceiveId = null;
       if (p.type === "receive" && p.supplierId) {
@@ -955,7 +1038,7 @@ class Store {
       }
       const future = [
           ...this.events(p.materialId)
-            .filter((e) => e.kind === "stock")
+            .filter((e) => e.kind === "stock" && (e.data.binId || defaultBinId) === bin.id)
             .map((e) => ({ date: e.date, quantity: e.data.quantity })),
           { date: dtValue, quantity },
         ].sort((a, b) => a.date.localeCompare(b.date));
@@ -971,6 +1054,8 @@ class Store {
         quantity,
         type: p.type,
         poId,
+        binId: bin.id,
+        warehouseId: bin.warehouseId,
         ...(supplierReceiveId ? { supplierReceiveId } : {}),
         note: text(p.note, "Reference / reason"),
       });

@@ -43,7 +43,7 @@ test('worker profile linking is owner-only, unique and isolates personal data',(
  assert.throws(()=>sec.run('link-worker',{id:other.id,workerId:'missing',pin:'123456'}));
  const c=new Security(store);c.run('unlock-pin',{pin:'123456'});c.run('login',{username:'linked',password:'Testing123'});
  assert.throws(()=>c.run('link-worker',{id:u.id,workerId:w2.id,pin:'123456'}));
- const view=c.run('snapshot');assert.equal(view.myWork.name,'Personal worker');assert.equal(view.myWork.balance.advanceDue,100);
+ const view=c.run('snapshot');assert.equal(view.myWork.name,'Personal worker');assert.equal(view.myWork.balance.advanceDue,100);assert.deepEqual(view.warehouse,[]);assert.deepEqual(view.bin,[]);assert.deepEqual(view['stock-count'],[]);
  assert.ok(!JSON.stringify(view).includes('PRIVATE'));assert.deepEqual(view.worker,[]);assert.deepEqual(view.balances,{});
  sec.run('link-worker',{id:u.id,workerId:'',pin:'123456'});assert.equal(c.run('snapshot').myWork,null);
  store.close();

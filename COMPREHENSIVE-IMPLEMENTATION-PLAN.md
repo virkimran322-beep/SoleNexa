@@ -43,7 +43,8 @@ Exit: a clean Windows x64 device can install, activate, operate, back up, restor
 
 ### Phase 2 — inventory, quality and operational UX
 
-- [ ] D-08: warehouse, bin, lot/batch, reservation, stock count and approval workflow.
+- [x] D-08: warehouse/bin foundation, per-bin stock guards, physical stock count and approval workflow.
+- [ ] D-08 follow-up: lot/batch traceability, reservations, transfers and multi-line count sheets.
 - [ ] D-09: landed cost, freight/discount/tax policy hooks and valuation controls.
 - [ ] D-10: BOM suggestions, planned-versus-actual consumption, WIP and scrap.
 - [ ] D-11: incoming, in-process and final quality inspection with defect/disposition workflow.

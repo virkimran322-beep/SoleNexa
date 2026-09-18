@@ -72,6 +72,7 @@ Factory mein configurable departments, piece/daily/salary workers, advances, wee
 - [x] Database backup export.
 - [x] Numbered transactional schema migration runner with pre-upgrade recovery copies and semantic restore validation.
 - [x] Automatic verified backups after startup, restore and posted changes with seven-copy retention and Settings health status.
+- [x] Warehouse/bin foundation with per-bin stock guards and reviewed stock-count variance adjustments.
 - [x] Validated database restore with pre-restore recovery copy.
 
 ### Phase 1 security and access
@@ -203,6 +204,7 @@ How to implement:
 - [x] Prevent inactive records from being selected in new transactions.
 - [x] Add CSV export for materials, workers, stock, POs and ledgers.
 - [x] Add pagination for large history tables.
+- [ ] Warehouse lot/batch traceability, reservations, transfers and multi-line count sheets remain future operational sub-phases.
 - [x] Add report filters for department, worker, PO and date range.
 - [ ] Add native backup/restore file-dialog acceptance on a physical computer.
 

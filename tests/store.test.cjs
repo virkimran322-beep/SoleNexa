@@ -69,6 +69,38 @@ test("backup validation rejects semantically invalid record payloads", (t) => {
   db.close();
   assert.throws(() => Store.validateBackup(backup), /Invalid backup record/);
 });
+test("warehouse stock count requires review and posts one audited variance", (t) => {
+  const { s, m } = fixture(t);
+  const bin = s.defaultBin();
+  s.command("stock", { materialId: m.id, binId: bin.id, type: "receive", quantity: 10, note: "Opening stock" });
+  const count = s.command("stock-count", { materialId: m.id, binId: bin.id, counted: 8, date: today(), note: "Physical count" });
+  assert.equal(count.expected, 10);
+  assert.equal(count.variance, -2);
+  assert.equal(s.command("stock-count-submit", { id: count.id }).status, "submitted");
+  const approved = s.command("stock-count-approve", { id: count.id });
+  assert.equal(approved.status, "approved");
+  assert.equal(s.stockAtBin(m.id, bin.id), 8);
+  assert.equal(s.events(m.id).filter((e) => e.kind === "stock" && e.data.stockCountId === count.id).length, 1);
+  assert.throws(() => s.command("stock-count-approve", { id: count.id }), /submitted/);
+});
+test("stock count approval rejects stale stock and preserves the count for review", (t) => {
+  const { s, m } = fixture(t);
+  const bin = s.defaultBin();
+  s.command("stock", { materialId: m.id, binId: bin.id, type: "receive", quantity: 4, note: "Opening stock" });
+  const count = s.command("stock-count", { materialId: m.id, binId: bin.id, counted: 3, date: today() });
+  s.command("stock-count-submit", { id: count.id });
+  s.command("stock", { materialId: m.id, binId: bin.id, type: "receive", quantity: 1, note: "Late receipt" });
+  assert.throws(() => s.command("stock-count-approve", { id: count.id }), /Stock changed/);
+  assert.equal(s.get("stock-count", count.id).status, "submitted");
+  assert.equal(s.stockAtBin(m.id, bin.id), 5);
+});
+test("stock movement guards are isolated per bin", (t) => {
+  const { s, m, p } = fixture(t);
+  const warehouse = s.all("warehouse")[0];
+  const secondBin = s.command("bin", { warehouseId: warehouse.id, code: "CUT", name: "Cutting stock" });
+  s.command("stock", { materialId: m.id, binId: s.defaultBin().id, type: "receive", quantity: 3, note: "Main stock" });
+  assert.throws(() => s.command("stock", { materialId: m.id, binId: secondBin.id, type: "issue", quantity: 1, poId: p.id, note: "Wrong bin" }), /Not enough stock/);
+});
 function fixture(t) {
   const s = new Store(":memory:");
   t.after(() => s.close());

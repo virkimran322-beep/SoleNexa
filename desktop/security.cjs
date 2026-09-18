@@ -1,16 +1,16 @@
 const { randomBytes, scryptSync, timingSafeEqual, createHash } = require('node:crypto');
 const roles = {
   owner: ['*'],
-  manager: ['material','material-revise','cost','po','worker','worker-revise','assignment','receipt','scan-receipt','stock','finished','dispatch','department','department-revise','supplier','supplier-revise','purchase','purchase-return','supplier-payment','correct-event','cancel-assignment','export-csv','whatsapp-share'],
+  manager: ['material','material-revise','cost','po','worker','worker-revise','assignment','receipt','scan-receipt','stock','finished','dispatch','department','department-revise','supplier','supplier-revise','purchase','purchase-return','supplier-payment','warehouse','bin','stock-count','stock-count-submit','stock-count-approve','stock-count-reject','correct-event','cancel-assignment','export-csv','whatsapp-share'],
   supervisor: ['assignment','receipt','scan-receipt'],
-  storekeeper: ['material','material-revise','stock','finished','dispatch','supplier','purchase','purchase-return','whatsapp-share'],
+  storekeeper: ['material','material-revise','stock','finished','dispatch','supplier','purchase','purchase-return','warehouse','bin','stock-count','stock-count-submit','whatsapp-share'],
   accountant: ['worker','worker-revise','advance','attendance','salary','settlement','supplier','supplier-revise','supplier-payment','export-csv','whatsapp-share'],
   worker: [],
 };
 const aliases = {admin:'owner','sub-manager':'supervisor',production:'supervisor',inventory:'storekeeper',accounts:'accountant',viewer:'worker'};
 const roleOf = r => aliases[r] || r;
 const safeUser = u => ({id:u.id,username:u.username,role:roleOf(u.role),active:u.active,workerId:u.workerId || null});
-const pinActions = new Set(['company-profile','material','material-revise','cost','po','worker','worker-revise','assignment','receipt','scan-receipt','stock','finished','dispatch','department','department-revise','supplier','supplier-revise','purchase','purchase-return','supplier-payment','advance','attendance','salary','settlement','correct-event','cancel-assignment','backup','restore','create-user','link-worker','change-password','reset-password','set-user-active','theme','delete-all-data']);
+const pinActions = new Set(['company-profile','material','material-revise','cost','po','worker','worker-revise','assignment','receipt','scan-receipt','stock','finished','dispatch','department','department-revise','supplier','supplier-revise','purchase','purchase-return','supplier-payment','warehouse','bin','stock-count','stock-count-submit','stock-count-approve','stock-count-reject','advance','attendance','salary','settlement','correct-event','cancel-assignment','backup','restore','create-user','link-worker','change-password','reset-password','set-user-active','theme','delete-all-data']);
 function validPin(value) { return typeof value === 'string' && /^\d{6}$/.test(value); }
 function passwordHash(value) {
   if(typeof value !== 'string' || value.length < 8 || value.length > 500) throw Error('Password must be 8–500 characters.');
@@ -199,7 +199,7 @@ class Security {
       } : null;
       // Notes, other workers, cost sheets and factory balances never leave the backend.
       s.config={companyName:s.config.companyName,companyLogo:s.config.companyLogo,theme:'light',language:'en'};
-      for(const key of ['material','cost','po','poCosts','worker','assignment','department','events']) s[key]=[];
+      for(const key of ['material','cost','po','poCosts','worker','assignment','department','events','warehouse','bin','stock-count','supplier','purchase']) s[key]=[];
       s.balances={};s.stocks={};s.poStats={};
     }
     if(!['owner','accountant'].includes(u.role)) {

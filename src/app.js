@@ -750,8 +750,8 @@ function inventory() {
     heading(
       "Finished inventory",
       "Receive completed pairs into stock, then record shop or customer dispatches. Ready quantity is limited by the least-complete required department.",
-      btn("Dispatch pairs", "dispatch") +
-        btn("Receive finished pairs", "finished", "", true),
+      btn("Add warehouse", "warehouse") + btn("Add bin", "bin") + btn("Start stock count", "stock-count") +
+        btn("Dispatch pairs", "dispatch") + btn("Receive finished pairs", "finished", "", true),
     ) +
     panel(
       "Stock by production order",
@@ -787,6 +787,14 @@ function inventory() {
               `<tr><td>${e.date}</td><td>${esc(find("po", e.target)?.number)}</td><td>${e.kind}</td><td>${qty(e.data.quantity)}</td><td>${esc(e.data.note)}</td></tr>`,
           ),
       ),
+    ) +
+    panel(
+      "Warehouse stock counts",
+      `<div class="panel-body"><p class="hint">Count one material in a bin, submit it for review, then an Owner or Manager can approve the variance. Approval creates an audited stock adjustment; original movements remain unchanged.</p>${state["stock-count"].length ? table(["Count","Material","Bin","System","Counted","Variance","Status","Action"], state["stock-count"].toReversed().map((c) => `<tr><td>${esc(c.number)}<small>${esc(c.date)}</small></td><td>${esc(c.materialName)}</td><td>${esc(c.binName)}</td><td>${qty(c.expected)}</td><td>${qty(c.counted)}</td><td>${badge((c.variance >= 0 ? "+" : "") + qty(c.variance), c.variance === 0 ? "green" : "amber")}</td><td>${badge(c.status, c.status === "approved" ? "green" : c.status === "submitted" ? "amber" : "")}</td><td>${c.status === "draft" && can("stock-count-submit") ? btn("Submit", "stock-count-submit", c.id) : c.status === "submitted" && can("stock-count-approve") ? btn("Approve", "stock-count-approve", c.id, true) + btn("Reject", "stock-count-reject", c.id) : c.rejectionReason ? esc(c.rejectionReason) : "—"}</td></tr>`)) : '<p class="muted">No stock counts recorded yet.</p>'}</div>`,
+    ) +
+    panel(
+      "Warehouse and bin register",
+      `<div class="panel-body">${table(["Warehouse","Bin","Status"], state.bin.map((b) => `<tr><td>${esc(state.warehouse.find((w) => w.id === b.warehouseId)?.name || "—")}</td><td><strong>${esc(b.code)}</strong><small>${esc(b.name)}</small></td><td>${badge(active(b) ? "Active" : "Inactive", active(b) ? "green" : "amber")}</td></tr>`))}</div>`,
     )
     + panel(
       "Size / colour stock",
@@ -999,6 +1007,16 @@ function materialSelect() {
     "Material",
     options(state.material.filter(active), (m) => `${m.name} (${m.unit})`),
   );
+}
+function binSelect() {
+  return select(
+    "binId",
+    "Warehouse bin",
+    state.bin.map((b) => [b.id, `${state.warehouse.find((w) => w.id === b.warehouseId)?.name || "Warehouse"} · ${b.code} · ${b.name}`]),
+  );
+}
+function warehouseSelect() {
+  return select("warehouseId", "Warehouse", state.warehouse.filter(active).map((w) => [w.id, `${w.code} · ${w.name}`]));
 }
 function poSelect(id = "") {
   return select(
@@ -1249,7 +1267,7 @@ function form(action, id) {
     requireRecords("material", "Add materials first.");
     title = "Record stock movement";
     fields =
-      materialSelect() +
+      materialSelect() + binSelect() +
       select("type", "Movement type", [
         ["receive", "Receive stock"],
         ["issue", "Issue to PO"],
@@ -1263,6 +1281,19 @@ function form(action, id) {
       `<div id="supplier-receive-fields" class="full">${select("supplierId", "Supplier (for received stock)", [["", "No supplier / internal stock"], ...state.supplier.filter(active).map((s) => [s.id, s.name])]).replace(" required", "")}<p class="hint" id="supplier-receive-total">Choose a supplier to add the material value automatically to its payable account.</p></div>` +
       note("Supplier / reference / reason") +
       '<p class="hint full">PO is required for issues and returns. For received stock, selecting a supplier automatically posts quantity × current material rate to that supplier account. Leave supplier blank for internal/opening stock.</p>';
+  }
+  if (action === "warehouse") {
+    title = "Add warehouse";
+    fields = input("code", "Warehouse code", "text", "", 'maxlength="20"') + input("name", "Warehouse name", "text", "", 'maxlength="100"');
+  }
+  if (action === "bin") {
+    title = "Add warehouse bin";
+    fields = warehouseSelect() + input("code", "Bin code", "text", "", 'maxlength="20"') + input("name", "Bin name", "text", "", 'maxlength="100"');
+  }
+  if (action === "stock-count") {
+    requireRecords("material", "Add materials before starting a stock count.");
+    title = "Start stock count";
+    fields = materialSelect() + binSelect() + number("counted", "Physical counted quantity", 0, "0.000001", 0) + dates() + note("Count note (optional)") + '<p class="hint full">The system quantity is captured now. Submit this draft for Owner/Manager review; approval posts only the variance.</p>';
   }
   if (["finished", "dispatch"].includes(action)) {
     requireRecords("po", "Create a PO first.");
@@ -1712,6 +1743,15 @@ document.addEventListener("click", async (e) => {
     if (action.startsWith("print-")) return printDoc(action, id);
     if (action === "delete-all-data") {
       return showForm("Permanently delete factory data", '<div class="error full">This removes factory records, users, audit history, settings, stock, costing, payroll and production data from this local database. This cannot be undone.</div><label class="full">Type DELETE ALL FACTORY DATA<input name="confirmation" required spellcheck="false" autocomplete="off" placeholder="DELETE ALL FACTORY DATA"></label>', async (p) => { const confirmation = String(p.confirmation || "").trim(); if (confirmation !== "DELETE ALL FACTORY DATA") throw Error("Type DELETE ALL FACTORY DATA exactly."); const pin = await requestFactoryPin(); await call("delete-all-data", { confirmation, pin }); state=null; await boot(); });
+    }
+    if (action === "stock-count-submit" || action === "stock-count-approve") {
+      await call(action, { id });
+      await refresh();
+      toast(action === "stock-count-submit" ? "Stock count submitted for approval." : "Stock count approved and variance posted.");
+      return;
+    }
+    if (action === "stock-count-reject") {
+      return showForm("Reject stock count", '<label class="full">Reason<textarea name="reason" rows="3" maxlength="500" required placeholder="Explain why this count must be repeated"></textarea></label>', async (p) => { await call(action, { id, reason: p.reason }); await refresh(); });
     }
     if (["backup", "restore"].includes(action)) {
       const result = await call(action);
