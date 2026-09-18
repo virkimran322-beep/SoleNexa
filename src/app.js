@@ -751,7 +751,7 @@ function inventory() {
     heading(
       "Finished inventory",
       "Receive completed pairs into stock, then record shop or customer dispatches. Ready quantity is limited by the least-complete required department.",
-      btn("Add warehouse", "warehouse") + btn("Add bin", "bin") + btn("Reserve stock", "reservation") + btn("Start stock count", "stock-count") +
+      btn("Add warehouse", "warehouse") + btn("Add bin", "bin") + btn("Reserve stock", "reservation") + btn("Transfer stock", "transfer") + btn("Start stock count", "stock-count") +
         btn("Dispatch pairs", "dispatch") + btn("Receive finished pairs", "finished", "", true),
     ) +
     panel(
@@ -802,6 +802,10 @@ function inventory() {
       `<div class="panel-body"><p class="hint">Reserve available raw stock for a planned issue. Reserved quantity is not available to other issues until it is consumed or released.</p>${(state.reservation || []).length ? table(["Reservation","Material","Lot","Bin","Reserved","Remaining","Status","Action"], state.reservation.toReversed().map((r) => { const remaining = reservationRemaining(r); return `<tr><td><strong>${esc(r.number)}</strong><small>${esc(r.date)}</small></td><td>${esc(r.materialName)}</td><td>${esc(r.lotCode || "Untracked")}</td><td>${esc(r.binName)}</td><td>${qty(r.quantity)}</td><td>${qty(remaining)}</td><td>${badge(remaining ? "Active" : "Consumed", remaining ? "amber" : "green")}</td><td>${remaining && can("reservation-release") ? btn("Release", "reservation-release", r.id) : "—"}</td></tr>`; })) : '<p class="muted">No stock reservations recorded yet.</p>'}</div>`,
     )
     + panel(
+      "Warehouse transfers",
+      `<div class="panel-body"><p class="hint">Transfers move stock between active bins in one transaction. Reserved quantity cannot be transferred until it is released or issued.</p>${(state.transfer || []).length ? table(["Transfer","Material","Lot","From","To","Quantity","Status"], state.transfer.toReversed().map((t) => `<tr><td><strong>${esc(t.number)}</strong><small>${esc(t.date)}</small></td><td>${esc(t.materialName)}</td><td>${esc(t.lotCode || "Untracked")}</td><td>${esc(t.sourceBinName)}</td><td>${esc(t.destinationBinName)}</td><td>${qty(t.quantity)}</td><td>${badge(t.status, "green")}</td></tr>`)) : '<p class="muted">No warehouse transfers recorded yet.</p>'}</div>`,
+    )
+    + panel(
       "Size / colour stock",
       state.po.some((p) => p.variants?.length)
         ? table(["PO", "Size", "Colour", "Planned", "Finished", "Dispatched", "On hand", "Label"], state.po.flatMap((p) => (state.poStats[p.id].variantStats || []).map((v) => `<tr><td>${esc(p.number)}</td><td>${esc(v.size)}</td><td>${esc(v.color)}</td><td>${qty(v.planned)}</td><td>${qty(v.finished)}</td><td>${qty(v.dispatched)}</td><td>${badge(qty(v.available) + " pairs", v.available ? "green" : "")}</td><td>${btn("Preview label", "print-label", `${p.id}|${v.key}`)}</td></tr>`)))
@@ -809,7 +813,7 @@ function inventory() {
     )
   );
 }
-const securedActions=['company-profile','material','material-revise','cost','po','worker','worker-revise','assignment','receipt','stock','finished','dispatch','department','department-revise','supplier','supplier-revise','purchase','purchase-return','supplier-payment','reservation','reservation-release','advance','attendance','salary','settlement','correct-event','cancel-assignment','backup','restore','delete-all-data'];
+const securedActions=['company-profile','material','material-revise','cost','po','worker','worker-revise','assignment','receipt','stock','finished','dispatch','department','department-revise','supplier','supplier-revise','purchase','purchase-return','supplier-payment','reservation','reservation-release','transfer','advance','attendance','salary','settlement','correct-event','cancel-assignment','backup','restore','delete-all-data'];
 const can=a=>state?.permissions?.includes('*') || state?.permissions?.includes(a);
 const correctionControl = (e) => {
   if (!can("correct-event") || !["stock", "receipt", "attendance", "settlement", "purchase-return", "supplier-payment", "supplier-receive"].includes(e.kind)) return "";
@@ -1017,8 +1021,11 @@ function binSelect() {
   return select(
     "binId",
     "Warehouse bin",
-    state.bin.map((b) => [b.id, `${state.warehouse.find((w) => w.id === b.warehouseId)?.name || "Warehouse"} · ${b.code} · ${b.name}`]),
+    state.bin.filter(active).map((b) => [b.id, `${state.warehouse.find((w) => w.id === b.warehouseId)?.name || "Warehouse"} · ${b.code} · ${b.name}`]),
   );
+}
+function transferBinSelect(name, label) {
+  return select(name, label, state.bin.filter(active).map((b) => [b.id, `${state.warehouse.find((w) => w.id === b.warehouseId)?.name || "Warehouse"} · ${b.code} · ${b.name}`]));
 }
 function reservationSelect() {
   const rows = (state.reservation || []).filter((r) => reservationRemaining(r) > 0);
@@ -1299,6 +1306,12 @@ function form(action, id) {
     requireRecords("material", "Add materials before creating a reservation.");
     title = "Reserve raw stock";
     fields = materialSelect() + binSelect() + input("lotCode", "Lot / batch (optional)", "text", "", 'maxlength="80"').replace(" required", "") + number("quantity", "Quantity to reserve", 1, "0.000001", 0.000001) + dates() + note("Reservation note / PO reference");
+  }
+  if (action === "transfer") {
+    requireRecords("material", "Add materials before transferring stock.");
+    if (state.bin.filter(active).length < 2) throw Error("Add at least two active bins before transferring stock.");
+    title = "Transfer stock between bins";
+    fields = materialSelect() + transferBinSelect("sourceBinId", "From bin") + transferBinSelect("destinationBinId", "To bin") + input("lotCode", "Lot / batch (optional)", "text", "", 'maxlength="80"').replace(" required", "") + number("quantity", "Quantity to transfer", 1, "0.000001", 0.000001) + dates() + note("Transfer reference / reason");
   }
   if (action === "bin") {
     title = "Add warehouse bin";

@@ -1,9 +1,9 @@
 const { randomBytes, scryptSync, timingSafeEqual, createHash } = require('node:crypto');
 const roles = {
   owner: ['*'],
-  manager: ['material','material-revise','cost','po','worker','worker-revise','assignment','receipt','scan-receipt','stock','finished','dispatch','department','department-revise','supplier','supplier-revise','purchase','purchase-return','supplier-payment','warehouse','bin','lot','reservation','reservation-release','stock-count','stock-count-submit','stock-count-approve','stock-count-reject','correct-event','cancel-assignment','export-csv','whatsapp-share'],
+  manager: ['material','material-revise','cost','po','worker','worker-revise','assignment','receipt','scan-receipt','stock','finished','dispatch','department','department-revise','supplier','supplier-revise','purchase','purchase-return','supplier-payment','warehouse','bin','lot','reservation','reservation-release','transfer','stock-count','stock-count-submit','stock-count-approve','stock-count-reject','correct-event','cancel-assignment','export-csv','whatsapp-share'],
   supervisor: ['assignment','receipt','scan-receipt'],
-  storekeeper: ['material','material-revise','stock','finished','dispatch','supplier','purchase','purchase-return','warehouse','bin','lot','reservation','reservation-release','stock-count','stock-count-submit','whatsapp-share'],
+  storekeeper: ['material','material-revise','stock','finished','dispatch','supplier','purchase','purchase-return','warehouse','bin','lot','reservation','reservation-release','transfer','stock-count','stock-count-submit','whatsapp-share'],
   accountant: ['worker','worker-revise','advance','attendance','salary','settlement','supplier','supplier-revise','supplier-payment','export-csv','whatsapp-share'],
   worker: [],
 };
@@ -199,7 +199,7 @@ class Security {
       } : null;
       // Notes, other workers, cost sheets and factory balances never leave the backend.
       s.config={companyName:s.config.companyName,companyLogo:s.config.companyLogo,theme:'light',language:'en'};
-      for(const key of ['material','cost','po','poCosts','worker','assignment','department','events','warehouse','bin','lot','reservation','stock-count','supplier','purchase']) s[key]=[];
+      for(const key of ['material','cost','po','poCosts','worker','assignment','department','events','warehouse','bin','lot','reservation','transfer','stock-count','supplier','purchase']) s[key]=[];
       s.balances={};s.stocks={};s.poStats={};
     }
     if(!['owner','accountant'].includes(u.role)) {

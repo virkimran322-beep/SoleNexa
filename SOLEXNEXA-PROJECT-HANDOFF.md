@@ -4,7 +4,7 @@ Last updated: 2026-09-18
 Project: SoleNexa  
 Company branding: IQ Links  
 Repository: https://github.com/virkimran322-beep/SoleNexa.git  
-Latest pushed commit: pending current D-09 verification
+Latest pushed commit: pending current warehouse-transfer verification
 Workspace: `D:\IQ Links\SoleNexa`
 
 ## How to continue in a new chat
@@ -75,6 +75,7 @@ Factory mein configurable departments, piece/daily/salary workers, advances, wee
 - [x] Warehouse/bin foundation with per-bin stock guards and reviewed stock-count variance adjustments.
 - [x] Optional lot/batch traceability for purchases, stock movements, returns and reviewed stock counts; legacy untracked stock remains compatible.
 - [x] Offline stock reservations with free-stock guards and audited consume/release events.
+- [x] Offline warehouse transfers between active bins with atomic linked events, optional lot identity and reserved-stock protection.
 - [x] Purchase landed-cost foundation: discount, freight and tax allocation, historical line valuation snapshots, landed supplier payable and landed-rate returns.
 - [x] Validated database restore with pre-restore recovery copy.
 
@@ -207,7 +208,8 @@ How to implement:
 - [x] Prevent inactive records from being selected in new transactions.
 - [x] Add CSV export for materials, workers, stock, POs and ledgers.
 - [x] Add pagination for large history tables.
-- [ ] Warehouse lot/batch traceability, reservations, transfers and multi-line count sheets remain future operational sub-phases.
+- [x] Warehouse lot/batch traceability, reservations and atomic transfers are implemented.
+- [ ] Multi-line stock count sheets remain a future operational sub-phase.
 - [x] Add report filters for department, worker, PO and date range.
 - [ ] Add native backup/restore file-dialog acceptance on a physical computer.
 

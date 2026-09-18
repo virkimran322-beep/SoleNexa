@@ -72,6 +72,7 @@ const kinds = [
   "bin",
   "lot",
   "reservation",
+  "transfer",
   "stock-count",
   "settings",
   "user",
@@ -314,6 +315,8 @@ class Store {
     check(!original.data.reversalOf, "A correction entry cannot be corrected.");
     check(!original.data.correctedBy, "This entry has already been corrected.");
     const note = text(reason, "Correction reason");
+    if (original.kind === "stock" && original.data.transferId)
+      throw Error("Transfer entries must be reversed as a complete transfer.");
     if(original.kind === 'stock' && original.data.purchaseId)
       throw Error('Use the purchase return entry to correct purchased stock; invoice stock cannot be reversed independently.');
     const correction = this.event("correction", original.target, today(), { originalEventId: original.id, originalKind: original.kind, reason: note });
@@ -810,6 +813,32 @@ class Store {
       const quantity = p.quantity == null || p.quantity === "" ? remaining : num(p.quantity, "Release quantity", 0.000001);
       check(quantity <= remaining, "Release quantity exceeds the reservation balance.");
       return this.event("reservation-release", reservation.id, today(), { quantity, note: text(p.note || "Reservation released", "Release reason") });
+    }
+    if (action === "transfer") {
+      const material = this.get("material", p.materialId);
+      const source = this.get("bin", p.sourceBinId), destination = this.get("bin", p.destinationBinId);
+      check(active(material), "Inactive materials cannot be transferred.");
+      check(active(source) && active(this.get("warehouse", source.warehouseId)), "Choose an active source bin.");
+      check(active(destination) && active(this.get("warehouse", destination.warehouseId)), "Choose an active destination bin.");
+      check(source.id !== destination.id, "Source and destination bins must be different.");
+      const quantity = num(p.quantity, "Transfer quantity", 0.000001), dateValue = postedDate(p.date || today());
+      const lotCode = String(p.lotCode || "").trim().slice(0, 80);
+      const lot = lotCode ? this.all("lot").find((item) => item.materialId === material.id && item.code.toLowerCase() === lotCode.toLowerCase()) : null;
+      check(!lotCode || lot, "Choose an existing lot before transferring it.");
+      const sourceStock = this.stockAtBinLot(material.id, source.id, dateValue, lot?.code || null);
+      const reserved = this.reservedAtBin(material.id, source.id, lot?.code || null);
+      check(quantity <= sourceStock - reserved, "Transfer exceeds free stock in the source bin.");
+      const transfer = this.add("transfer", {
+        number: `TRF-${String(this.all("transfer").length + 1).padStart(4, "0")}`,
+        date: dateValue, materialId: material.id, materialName: material.name,
+        sourceBinId: source.id, sourceBinName: source.name, sourceWarehouseId: source.warehouseId,
+        destinationBinId: destination.id, destinationBinName: destination.name, destinationWarehouseId: destination.warehouseId,
+        lotId: lot?.id || null, lotCode: lot?.code || null, quantity,
+        note: String(p.note || "").trim().slice(0, 500), status: "completed", active: true,
+      });
+      this.event("stock", material.id, dateValue, { quantity: -quantity, type: "transfer-out", binId: source.id, warehouseId: source.warehouseId, lotId: lot?.id || null, lotCode: lot?.code || null, transferId: transfer.id, note: `Transfer ${transfer.number} to ${destination.name}` });
+      this.event("stock", material.id, dateValue, { quantity, type: "transfer-in", binId: destination.id, warehouseId: destination.warehouseId, lotId: lot?.id || null, lotCode: lot?.code || null, transferId: transfer.id, note: `Transfer ${transfer.number} from ${source.name}` });
+      return transfer;
     }
     if (action === "stock-count-submit") {
       const count = this.get("stock-count", p.id);

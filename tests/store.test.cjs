@@ -134,6 +134,20 @@ test("stock reservations reduce free stock and are consumed or released by audit
   assert.equal(s.reservationRemaining(reservation), 2);
   assert.equal(s.events(reservation.id).filter((e) => e.kind === "reservation-release").length, 1);
 });
+test("warehouse transfer moves one lot atomically and cannot consume reserved stock", (t) => {
+  const { s, m } = fixture(t);
+  const warehouse = s.all("warehouse")[0];
+  const destination = s.command("bin", { warehouseId: warehouse.id, code: "PACK", name: "Packing stock" });
+  const source = s.defaultBin();
+  s.command("stock", { materialId: m.id, binId: source.id, type: "receive", quantity: 10, lotCode: "TRF-1", note: "Transfer source" });
+  s.command("reservation", { materialId: m.id, binId: source.id, quantity: 6, lotCode: "TRF-1", date: today(), note: "Reserved for production" });
+  assert.throws(() => s.command("transfer", { materialId: m.id, sourceBinId: source.id, destinationBinId: destination.id, quantity: 5, lotCode: "TRF-1", date: today(), note: "Too much" }), /free stock/);
+  const transfer = s.command("transfer", { materialId: m.id, sourceBinId: source.id, destinationBinId: destination.id, quantity: 4, lotCode: "TRF-1", date: today(), note: "Move to packing" });
+  assert.equal(transfer.status, "completed");
+  assert.equal(s.stockAtBinLot(m.id, source.id, "9999-12-31", "TRF-1"), 6);
+  assert.equal(s.stockAtBinLot(m.id, destination.id, "9999-12-31", "TRF-1"), 4);
+  assert.equal(s.events(m.id).filter((e) => e.data.transferId === transfer.id).length, 2);
+});
 function fixture(t) {
   const s = new Store(":memory:");
   t.after(() => s.close());

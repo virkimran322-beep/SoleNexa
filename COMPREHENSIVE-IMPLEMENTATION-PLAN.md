@@ -46,7 +46,8 @@ Exit: a clean Windows x64 device can install, activate, operate, back up, restor
 - [x] D-08: warehouse/bin foundation, per-bin stock guards, physical stock count and approval workflow.
 - [x] D-08 lot/batch foundation: optional lot codes on purchases and stock movements, lot-isolated stock guards, returns and physical counts.
 - [x] D-08 reservation foundation: free-stock reservation, reservation-aware issue guard, audited consume/release events and reservation register.
-- [ ] D-08 follow-up: warehouse transfers and multi-line count sheets.
+- [x] D-08 warehouse transfer foundation: atomic bin-to-bin movement, lot-aware stock checks, reserved-stock guard and linked transfer events.
+- [ ] D-08 follow-up: multi-line count sheets.
 - [x] D-09 foundation: purchase landed-cost snapshots with discount, freight and tax allocation, supplier payable totals and landed-rate returns.
 - [ ] D-09 follow-up: accountant-approved weighted-average/FIFO valuation policy, period close and valuation reports.
 - [ ] D-10: BOM suggestions, planned-versus-actual consumption, WIP and scrap.

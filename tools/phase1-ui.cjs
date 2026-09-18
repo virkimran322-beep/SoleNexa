@@ -15,7 +15,7 @@ try{
  const result=await win.webContents.executeJavaScript(`(async()=>{
  const delay=()=>new Promise(r=>setTimeout(r,120));
  async function wait(fn){for(let i=0;i<40;i++){if(fn())return;await delay();}throw Error('UI wait timed out: '+document.querySelector('h1')?.textContent+' '+document.querySelector('.error')?.textContent);}
- async function submit(values){console.log('Submitting',Object.keys(values).join(','));const form=document.querySelector('dialog[open] form') || document.querySelector('#main form');for(const [k,v]of Object.entries(values))form.querySelector('[name="'+k+'"]').value=v;form.requestSubmit(form.querySelector("button[type=submit]"));await delay();const pinForm=document.querySelector('.pin-prompt');if(pinForm){pinForm.querySelector('[name=pin]').value='123456';pinForm.requestSubmit(pinForm.querySelector("button[type=submit]"));await delay();}}
+ async function submit(values){console.log('Submitting',Object.keys(values).join(','));const form=document.querySelector('dialog[open] form') || document.querySelector('#main form');for(const [k,v]of Object.entries(values))form.querySelector('[name="'+k+'"]').value=v;form.requestSubmit(form.querySelector("button[type=submit]"));for(let i=0;i<10 && !document.querySelector('.pin-prompt');i++)await delay();const pinForm=document.querySelector('.pin-prompt');if(pinForm){pinForm.querySelector('[name=pin]').value='123456';pinForm.requestSubmit(pinForm.querySelector("button[type=submit]"));await delay();}}
  await wait(()=>document.querySelector('[name=key]'));
  const activationFields=[...document.querySelectorAll('.gate-card input,.gate-card textarea')];
  if(activationFields.some(field=>!field.closest('label')))throw Error('Activation fields must have visible labels');

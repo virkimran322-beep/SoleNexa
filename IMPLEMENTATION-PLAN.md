@@ -84,6 +84,7 @@ Offline Windows desktop software for a footwear factory with a Shopify store. Fa
 - [x] Landed-cost foundation: purchase discount, freight and tax are allocated to line-level historical valuation snapshots; supplier payable and returns use the landed total/rate.
 - [x] Optional lot/batch traceability on purchases, stock movements, returns and reviewed stock counts; legacy untracked stock remains compatible.
 - [x] Offline stock reservations with reservation-aware issue guards and audited consume/release events.
+- [x] Offline warehouse transfers between active bins with atomic linked stock events, lot support and reserved-stock protection.
 - [ ] Accountant approval and implementation of the final inventory valuation method (weighted average, FIFO or another approved policy).
 - [x] Structured size/colour PO breakdown with exact pair-total validation; legacy POs remain compatible.
 - [x] Independent finished-stock and dispatch bins for new PO size/colour variants; legacy PO-level stock remains compatible.
