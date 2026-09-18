@@ -778,19 +778,19 @@ function inventory() {
     panel(
       "Dispatch & receipt history",
       table(
-        ["Date", "PO", "Movement", "Pairs", "Reference"],
+        ["Date", "PO", "Movement", "Lot", "Pairs", "Reference"],
         state.events
           .filter((e) => ["finished", "dispatch"].includes(e.kind))
           .toReversed()
           .map(
             (e) =>
-              `<tr><td>${e.date}</td><td>${esc(find("po", e.target)?.number)}</td><td>${e.kind}</td><td>${qty(e.data.quantity)}</td><td>${esc(e.data.note)}</td></tr>`,
+              `<tr><td>${e.date}</td><td>${esc(find("po", e.target)?.number)}</td><td>${e.kind}</td><td>${esc(e.data.lotCode || "Untracked")}</td><td>${qty(e.data.quantity)}</td><td>${esc(e.data.note)}</td></tr>`,
           ),
       ),
     ) +
     panel(
       "Warehouse stock counts",
-      `<div class="panel-body"><p class="hint">Count one material in a bin, submit it for review, then an Owner or Manager can approve the variance. Approval creates an audited stock adjustment; original movements remain unchanged.</p>${state["stock-count"].length ? table(["Count","Material","Bin","System","Counted","Variance","Status","Action"], state["stock-count"].toReversed().map((c) => `<tr><td>${esc(c.number)}<small>${esc(c.date)}</small></td><td>${esc(c.materialName)}</td><td>${esc(c.binName)}</td><td>${qty(c.expected)}</td><td>${qty(c.counted)}</td><td>${badge((c.variance >= 0 ? "+" : "") + qty(c.variance), c.variance === 0 ? "green" : "amber")}</td><td>${badge(c.status, c.status === "approved" ? "green" : c.status === "submitted" ? "amber" : "")}</td><td>${c.status === "draft" && can("stock-count-submit") ? btn("Submit", "stock-count-submit", c.id) : c.status === "submitted" && can("stock-count-approve") ? btn("Approve", "stock-count-approve", c.id, true) + btn("Reject", "stock-count-reject", c.id) : c.rejectionReason ? esc(c.rejectionReason) : "—"}</td></tr>`)) : '<p class="muted">No stock counts recorded yet.</p>'}</div>`,
+      `<div class="panel-body"><p class="hint">Count one material in a bin, optionally by lot, submit it for review, then an Owner or Manager can approve the variance. Approval creates an audited stock adjustment; original movements remain unchanged.</p>${state["stock-count"].length ? table(["Count","Material","Lot","Bin","System","Counted","Variance","Status","Action"], state["stock-count"].toReversed().map((c) => `<tr><td>${esc(c.number)}<small>${esc(c.date)}</small></td><td>${esc(c.materialName)}</td><td>${esc(c.lotCode || "Untracked")}</td><td>${esc(c.binName)}</td><td>${qty(c.expected)}</td><td>${qty(c.counted)}</td><td>${badge((c.variance >= 0 ? "+" : "") + qty(c.variance), c.variance === 0 ? "green" : "amber")}</td><td>${badge(c.status, c.status === "approved" ? "green" : c.status === "submitted" ? "amber" : "")}</td><td>${c.status === "draft" && can("stock-count-submit") ? btn("Submit", "stock-count-submit", c.id) : c.status === "submitted" && can("stock-count-approve") ? btn("Approve", "stock-count-approve", c.id, true) + btn("Reject", "stock-count-reject", c.id) : c.rejectionReason ? esc(c.rejectionReason) : "—"}</td></tr>`)) : '<p class="muted">No stock counts recorded yet.</p>'}</div>`,
     ) +
     panel(
       "Warehouse and bin register",
@@ -1103,7 +1103,7 @@ function costLine() {
   return `<div class="line-item">${materialSelect()}${number("quantity", "Qty / pair", 1, "0.000001", 0.000001)}${number("wastage", "Waste %", 0)}${btn("Remove", "remove-line")}</div>`;
 }
 function purchaseLine() {
-  return `<div class="line-item purchase-line">${materialSelect()}${number("quantity", "Received quantity", 1, "0.000001", 0.000001)}${number("rate", "Rate / unit (Rs)", 0)}${btn("Remove", "remove-line")}</div>`;
+  return `<div class="line-item purchase-line">${materialSelect()}${number("quantity", "Received quantity", 1, "0.000001", 0.000001)}${number("rate", "Rate / unit (Rs)", 0)}${input("lotCode", "Lot / batch (optional)", "text", "", 'maxlength="80"').replace(" required", "")}${btn("Remove", "remove-line")}</div>`;
 }
 function variantLine() {
   return `<div class="line-item variant-line">${input("variantSize", "Size", "text", "", 'maxlength="30"').replace(" required", "")}${input("variantColor", "Colour", "text", "", 'maxlength="50"').replace(" required", "")}${number("variantQuantity", "Pairs", 1, "1", 1).replace(" required", "")}${btn("Remove", "remove-line")}</div>`;
@@ -1267,7 +1267,7 @@ function form(action, id) {
     requireRecords("material", "Add materials first.");
     title = "Record stock movement";
     fields =
-      materialSelect() + binSelect() +
+      materialSelect() + binSelect() + input("lotCode", "Lot / batch (optional)", "text", "", 'maxlength="80"').replace(" required", "") +
       select("type", "Movement type", [
         ["receive", "Receive stock"],
         ["issue", "Issue to PO"],
@@ -1280,7 +1280,7 @@ function form(action, id) {
       poSelect().replace(" required", "") +
       `<div id="supplier-receive-fields" class="full">${select("supplierId", "Supplier (for received stock)", [["", "No supplier / internal stock"], ...state.supplier.filter(active).map((s) => [s.id, s.name])]).replace(" required", "")}<p class="hint" id="supplier-receive-total">Choose a supplier to add the material value automatically to its payable account.</p></div>` +
       note("Supplier / reference / reason") +
-      '<p class="hint full">PO is required for issues and returns. For received stock, selecting a supplier automatically posts quantity × current material rate to that supplier account. Leave supplier blank for internal/opening stock.</p>';
+      '<p class="hint full">PO is required for issues and returns. Lot / batch is optional for legacy or untracked stock, but once entered it keeps stock guards and history separate. For received stock, selecting a supplier automatically posts quantity × current material rate to that supplier account.</p>';
   }
   if (action === "warehouse") {
     title = "Add warehouse";
@@ -1293,7 +1293,7 @@ function form(action, id) {
   if (action === "stock-count") {
     requireRecords("material", "Add materials before starting a stock count.");
     title = "Start stock count";
-    fields = materialSelect() + binSelect() + number("counted", "Physical counted quantity", 0, "0.000001", 0) + dates() + note("Count note (optional)") + '<p class="hint full">The system quantity is captured now. Submit this draft for Owner/Manager review; approval posts only the variance.</p>';
+    fields = materialSelect() + binSelect() + input("lotCode", "Lot / batch (optional)", "text", "", 'maxlength="80"').replace(" required", "") + number("counted", "Physical counted quantity", 0, "0.000001", 0) + dates() + note("Count note (optional)") + '<p class="hint full">The system quantity is captured now. If a lot is entered, only that lot is counted. Submit this draft for Owner/Manager review; approval posts only the variance.</p>';
   }
   if (["finished", "dispatch"].includes(action)) {
     requireRecords("po", "Create a PO first.");
@@ -1366,7 +1366,7 @@ function form(action, id) {
     requireRecords("supplier", "Add a supplier first.");
     requireRecords("material", "Add materials first.");
     title = "Record material purchase";
-    fields = select("supplierId", "Supplier", options(state.supplier.filter(active), (s) => s.name)) + input("invoice", "Invoice / bill number") + dates() + '<div class="full"><h3>Materials received</h3><div id="purchase-lines">' + purchaseLine() + '</div>' + btn("+ Add material line", "add-purchase-line") + '</div>' + '<div class="form-grid full"><div><h3>Bill adjustments (Rs)</h3>' + number("discount", "Discount", 0, "0.01", 0) + number("freight", "Freight / landed cost", 0, "0.01", 0) + number("tax", "Tax / duty", 0, "0.01", 0) + '</div><p class="hint">Discount is allocated across lines; freight and tax are added to landed cost. The bill total and each line’s landed rate are saved as a historical snapshot.</p></div>' + note("Purchase note (optional)").replace(" required", "") + '<p class="hint full">Material stock is received with the saved invoice quantity and landed valuation rate. Supplier payable uses the full landed bill total.</p>';
+    fields = select("supplierId", "Supplier", options(state.supplier.filter(active), (s) => s.name)) + input("invoice", "Invoice / bill number") + dates() + '<div class="full"><h3>Materials received</h3><div id="purchase-lines">' + purchaseLine() + '</div>' + btn("+ Add material line", "add-purchase-line") + '<p class="hint">Lot / batch is optional. Enter it when the supplier gives a batch number so stock, returns and counts can be separated safely.</p></div>' + '<div class="form-grid full"><div><h3>Bill adjustments (Rs)</h3>' + number("discount", "Discount", 0, "0.01", 0) + number("freight", "Freight / landed cost", 0, "0.01", 0) + number("tax", "Tax / duty", 0, "0.01", 0) + '</div><p class="hint">Discount is allocated across lines; freight and tax are added to landed cost. The bill total and each line’s landed rate are saved as a historical snapshot.</p></div>' + note("Purchase note (optional)").replace(" required", "") + '<p class="hint full">Material stock is received with the saved invoice quantity and landed valuation rate. Supplier payable uses the full landed bill total.</p>';
     save = (p) => {
       p.lines = [...document.querySelectorAll(".purchase-line")].map((row) => Object.fromEntries([...row.querySelectorAll("input,select")].map((el) => [el.name, el.value])));
       return call(action, p);

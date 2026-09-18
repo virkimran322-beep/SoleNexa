@@ -70,6 +70,7 @@ const kinds = [
   "purchase",
   "warehouse",
   "bin",
+  "lot",
   "stock-count",
   "settings",
   "user",
@@ -388,19 +389,31 @@ class Store {
     return bin;
   }
   stockAtBin(materialId, binId, until = "9999-12-31") {
+    return this.stockAtBinLot(materialId, binId, until);
+  }
+  stockAtBinLot(materialId, binId, until = "9999-12-31", lotCode = null) {
     const defaultBinId = this.defaultBin().id;
     return round(
       this.events(materialId)
-        .filter((e) => e.kind === "stock" && e.date <= until && (e.data.binId || defaultBinId) === binId)
+        .filter((e) => e.kind === "stock" && e.date <= until && (e.data.binId || defaultBinId) === binId && (lotCode == null || (e.data.lotCode || "") === lotCode))
         .reduce((s, e) => s + e.data.quantity, 0),
     );
   }
-  stock(id, until = "9999-12-31") {
+  stock(id, until = "9999-12-31", lotCode = null) {
     return round(
       this.events(id)
         .filter((e) => e.kind === "stock" && e.date <= until)
+        .filter((e) => lotCode == null || (e.data.lotCode || "") === lotCode)
         .reduce((s, e) => s + e.data.quantity, 0),
     );
+  }
+  ensureLot(materialId, lotCode, dateValue = today()) {
+    const code = String(lotCode || "").trim().slice(0, 80);
+    if (!code) return null;
+    const material = this.get("material", materialId);
+    const existing = this.all("lot").find((lot) => lot.materialId === material.id && lot.code.toLowerCase() === code.toLowerCase());
+    if (existing) return existing;
+    return this.add("lot", { code, materialId: material.id, materialName: material.name, firstReceived: dateValue, active: true });
   }
   supplierBalance(supplierId) {
     const purchases = this.all("purchase").filter((p) => p.supplierId === supplierId);
@@ -680,7 +693,9 @@ class Store {
         const material = this.get("material", line.materialId);
         check(active(material), "Inactive materials cannot be purchased.");
         const quantity = num(line.quantity, "Quantity", 0.000001), rate = cents(line.rate);
-        return { materialId: material.id, name: material.name, unit: material.unit, quantity, rate, amount: safeMoney(Math.round(quantity * rate)) };
+        const lotCode = String(line.lotCode || "").trim().slice(0, 80);
+        const lot = lotCode ? this.ensureLot(material.id, lotCode, postedDate(p.date || today())) : null;
+        return { materialId: material.id, name: material.name, unit: material.unit, quantity, rate, amount: safeMoney(Math.round(quantity * rate)), lotCode: lot?.code || null, lotId: lot?.id || null };
       });
       const subtotal = lines.reduce((sum, line) => sum + line.amount, 0);
       const discount = cents(p.discount || 0), freight = cents(p.freight || 0), tax = cents(p.tax || 0);
@@ -695,7 +710,7 @@ class Store {
         return { ...line, landedAmount, landedRate: round(landedAmount / line.quantity) };
       });
       const purchase = this.add("purchase", { number: `PUR-${String(this.all("purchase").length + 1).padStart(4, "0")}`, supplierId: supplier.id, supplierName: supplier.name, invoice, date: dt(), lines: landedLines, subtotal, discount, freight, tax, total: landedTotal, valuationMethod: "landed-cost", notes: String(p.note || "").slice(0, 500) });
-      for (const line of landedLines) this.event("stock", line.materialId, purchase.date, { quantity: line.quantity, type: "receive", purchaseId: purchase.id, invoice, valuationRate: line.landedRate, valuationAmount: line.landedAmount, note: `Purchase ${purchase.number} · ${invoice}` });
+      for (const line of landedLines) this.event("stock", line.materialId, purchase.date, { quantity: line.quantity, type: "receive", purchaseId: purchase.id, invoice, lotId: line.lotId, lotCode: line.lotCode, valuationRate: line.landedRate, valuationAmount: line.landedAmount, note: `Purchase ${purchase.number} · ${invoice}` });
       return purchase;
     }
     if (action === "purchase-return") {
@@ -706,12 +721,12 @@ class Store {
       check(quantity <= line.quantity - returned, "Purchase return exceeds the received quantity.");
       const dtValue = dt();
       check(dtValue >= purchase.date, "Return date cannot be before the purchase date.");
-      const material = this.get("material", materialId), currentStock = this.stock(material.id);
+      const material = this.get("material", materialId), currentStock = this.stock(material.id, "9999-12-31", line.lotCode || null);
       check(quantity <= currentStock, "Cannot return more than current stock. Issue or adjust the remaining stock first.");
       const valuationRate = line.landedRate ?? line.rate;
       const amount = safeMoney(Math.round(quantity * valuationRate));
-      const returnedEvent = this.event("purchase-return", material.id, dtValue, { purchaseId: purchase.id, supplierId: purchase.supplierId, materialId: material.id, quantity, amount, valuationRate, note: text(p.note, "Return reason") });
-      this.event("stock", material.id, dtValue, { quantity: -quantity, type: "purchase-return", purchaseId: purchase.id, purchaseReturnId: returnedEvent.id, valuationRate, valuationAmount: amount, note: `Purchase return · ${purchase.invoice}` });
+      const returnedEvent = this.event("purchase-return", material.id, dtValue, { purchaseId: purchase.id, supplierId: purchase.supplierId, materialId: material.id, quantity, amount, valuationRate, lotId: line.lotId, lotCode: line.lotCode, note: text(p.note, "Return reason") });
+      this.event("stock", material.id, dtValue, { quantity: -quantity, type: "purchase-return", purchaseId: purchase.id, purchaseReturnId: returnedEvent.id, lotId: line.lotId, lotCode: line.lotCode, valuationRate, valuationAmount: amount, note: `Purchase return · ${purchase.invoice}` });
       return returnedEvent;
     }
     if (action === "supplier-payment") {
@@ -742,12 +757,16 @@ class Store {
       check(active(bin) && active(this.get("warehouse", bin.warehouseId)), "Choose an active warehouse bin.");
       const countDate = postedDate(p.date || today());
       const counted = num(p.counted, "Counted quantity");
-      const expected = this.stockAtBin(material.id, bin.id, countDate);
-      check(!this.all("stock-count").some((c) => (c.status === "draft" || c.status === "submitted") && c.materialId === material.id && c.binId === bin.id), "Finish the existing count for this material and bin first.");
+      const lotCode = String(p.lotCode || "").trim().slice(0, 80);
+      const lot = lotCode ? this.all("lot").find((item) => item.materialId === material.id && item.code.toLowerCase() === lotCode.toLowerCase()) : null;
+      check(!lotCode || lot, "Choose an existing lot before counting it.");
+      const expected = this.stockAtBinLot(material.id, bin.id, countDate, lot?.code || null);
+      check(!this.all("stock-count").some((c) => (c.status === "draft" || c.status === "submitted") && c.materialId === material.id && c.binId === bin.id && (c.lotCode || "") === (lot?.code || "")), "Finish the existing count for this material, bin and lot first.");
       return this.add("stock-count", {
         number: `COUNT-${String(this.all("stock-count").length + 1).padStart(4, "0")}`,
         date: countDate, materialId: material.id, materialName: material.name,
         binId: bin.id, binName: bin.name, warehouseId: bin.warehouseId,
+        lotId: lot?.id || null, lotCode: lot?.code || null,
         expected, counted, variance: round(counted - expected),
         note: String(p.note || "").trim().slice(0, 500), status: "draft",
       });
@@ -770,10 +789,10 @@ class Store {
       const count = this.get("stock-count", p.id);
       check(count.status === "submitted", "Only a submitted stock count can be approved.");
       check(count.date === today(), "Only a same-day stock count can be approved safely.");
-      const current = this.stockAtBin(count.materialId, count.binId, count.date);
+      const current = this.stockAtBinLot(count.materialId, count.binId, count.date, count.lotCode || null);
       check(round(current) === round(count.expected), "Stock changed after this count. Start a new count before approval.");
       check(round(current + count.variance) >= 0, "Count adjustment cannot make the bin stock negative.");
-      const movement = this.event("stock", count.materialId, count.date, { quantity: count.variance, type: "count-adjustment", binId: count.binId, warehouseId: count.warehouseId, stockCountId: count.id, note: `Approved ${count.number}${count.note ? ` · ${count.note}` : ""}` });
+      const movement = this.event("stock", count.materialId, count.date, { quantity: count.variance, type: "count-adjustment", binId: count.binId, warehouseId: count.warehouseId, lotId: count.lotId, lotCode: count.lotCode, stockCountId: count.id, note: `Approved ${count.number}${count.note ? ` · ${count.note}` : ""}` });
       const next = { ...count, status: "approved", approvedAt: new Date().toISOString(), adjustmentEventId: movement.id };
       this.db.prepare("UPDATE records SET data=? WHERE id=?").run(JSON.stringify(next), next.id);
       return next;
@@ -1020,6 +1039,9 @@ class Store {
       const qty = num(p.quantity, "Quantity", 0.000001),
         quantity = ["issue", "adjust-down"].includes(p.type) ? -qty : qty;
       const dtValue = dt();
+      const lotCode = String(p.lotCode || "").trim().slice(0, 80);
+      const lot = lotCode ? (p.type === "receive" ? this.ensureLot(material.id, lotCode, dtValue) : this.all("lot").find((item) => item.materialId === material.id && item.code.toLowerCase() === lotCode.toLowerCase())) : null;
+      check(!lotCode || lot, "Choose an existing lot for this movement, or receive the lot first.");
       const bin = this.get("bin", p.binId || this.defaultBin().id);
       check(active(bin) && active(this.get("warehouse", bin.warehouseId)), "Choose an active warehouse bin.");
       const defaultBinId = this.defaultBin().id;
@@ -1052,7 +1074,7 @@ class Store {
       }
       const future = [
           ...this.events(p.materialId)
-            .filter((e) => e.kind === "stock" && (e.data.binId || defaultBinId) === bin.id)
+            .filter((e) => e.kind === "stock" && (e.data.binId || defaultBinId) === bin.id && (!lotCode || (e.data.lotCode || "") === lot.code))
             .map((e) => ({ date: e.date, quantity: e.data.quantity })),
           { date: dtValue, quantity },
         ].sort((a, b) => a.date.localeCompare(b.date));
@@ -1070,6 +1092,8 @@ class Store {
         poId,
         binId: bin.id,
         warehouseId: bin.warehouseId,
+        lotId: lot?.id || null,
+        lotCode: lot?.code || null,
         ...(supplierReceiveId ? { supplierReceiveId } : {}),
         note: text(p.note, "Reference / reason"),
       });

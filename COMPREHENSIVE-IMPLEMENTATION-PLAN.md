@@ -44,7 +44,8 @@ Exit: a clean Windows x64 device can install, activate, operate, back up, restor
 ### Phase 2 — inventory, quality and operational UX
 
 - [x] D-08: warehouse/bin foundation, per-bin stock guards, physical stock count and approval workflow.
-- [ ] D-08 follow-up: lot/batch traceability, reservations, transfers and multi-line count sheets.
+- [x] D-08 lot/batch foundation: optional lot codes on purchases and stock movements, lot-isolated stock guards, returns and physical counts.
+- [ ] D-08 follow-up: reservations, transfers and multi-line count sheets.
 - [x] D-09 foundation: purchase landed-cost snapshots with discount, freight and tax allocation, supplier payable totals and landed-rate returns.
 - [ ] D-09 follow-up: accountant-approved weighted-average/FIFO valuation policy, period close and valuation reports.
 - [ ] D-10: BOM suggestions, planned-versus-actual consumption, WIP and scrap.

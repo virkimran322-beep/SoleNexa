@@ -73,6 +73,7 @@ Factory mein configurable departments, piece/daily/salary workers, advances, wee
 - [x] Numbered transactional schema migration runner with pre-upgrade recovery copies and semantic restore validation.
 - [x] Automatic verified backups after startup, restore and posted changes with seven-copy retention and Settings health status.
 - [x] Warehouse/bin foundation with per-bin stock guards and reviewed stock-count variance adjustments.
+- [x] Optional lot/batch traceability for purchases, stock movements, returns and reviewed stock counts; legacy untracked stock remains compatible.
 - [x] Purchase landed-cost foundation: discount, freight and tax allocation, historical line valuation snapshots, landed supplier payable and landed-rate returns.
 - [x] Validated database restore with pre-restore recovery copy.
 

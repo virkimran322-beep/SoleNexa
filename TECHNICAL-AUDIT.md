@@ -86,6 +86,7 @@ The current offline build packages no private licensing credentials. Activation 
 - Offline Phase 1 dashboard usability polish adds context-aware Quick Actions and a clear local-data safety card; no network or synchronization dependency was introduced.
 - Stock receive now optionally links an active supplier and posts the automatic material-rate payable as an audited supplier-receive event; purchase-linked receipts remain unchanged to prevent double counting.
 - Purchase records now preserve subtotal, discount, freight, tax, landed total, line-level landed amount and landed rate snapshots. Supplier payable is based on the landed total, and purchase returns reverse the landed rate. The Settings page keeps the final inventory valuation method visibly unconfigured until the owner/accountant approves weighted average, FIFO or another policy; no silent valuation assumption is made.
+- Optional lot records now link purchase lines and stock events to a material-specific batch code. Lot-specific stock guards, returns and stock-count variance approvals preserve the legacy untracked-stock path and keep lot balances separate.
 - The 2026-09-18 landed-cost regression covers proportional allocation, rounding residuals, supplier payable totals, landed-rate returns and historical line valuation without changing older purchase records.
 - Desktop smoke test passes IPC, activation gate, sandboxed renderer and startup behavior.
 - Windows x64 NSIS and portable artifacts rebuild successfully with the square SoleNexa icon and branded installer artwork.

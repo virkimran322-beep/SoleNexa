@@ -101,6 +101,25 @@ test("stock movement guards are isolated per bin", (t) => {
   s.command("stock", { materialId: m.id, binId: s.defaultBin().id, type: "receive", quantity: 3, note: "Main stock" });
   assert.throws(() => s.command("stock", { materialId: m.id, binId: secondBin.id, type: "issue", quantity: 1, poId: p.id, note: "Wrong bin" }), /Not enough stock/);
 });
+test("lot tracked purchases keep stock counts and returns isolated", (t) => {
+  const { s, m } = fixture(t);
+  const supplier = s.command("supplier", { name: "Batch Supplier" });
+  const first = s.command("purchase", { supplierId: supplier.id, invoice: "LOT-A", date: today(), lines: [{ materialId: m.id, quantity: 10, rate: 100, lotCode: "A-001" }] });
+  const second = s.command("purchase", { supplierId: supplier.id, invoice: "LOT-B", date: today(), lines: [{ materialId: m.id, quantity: 5, rate: 100, lotCode: "B-001" }] });
+  assert.equal(s.all("lot").length, 2);
+  assert.equal(s.stock(m.id, "9999-12-31", "A-001"), 10);
+  assert.equal(s.stock(m.id, "9999-12-31", "B-001"), 5);
+  const returned = s.command("purchase-return", { purchaseId: first.id, materialId: m.id, quantity: 6, date: today(), note: "Lot A return" });
+  assert.equal(returned.data.lotCode, "A-001");
+  assert.equal(s.stock(m.id, "9999-12-31", "A-001"), 4);
+  assert.equal(s.stock(m.id, "9999-12-31", "B-001"), 5);
+  s.command("stock", { materialId: m.id, type: "adjust-down", quantity: 3, lotCode: "A-001", note: "Lot A damaged" });
+  assert.throws(() => s.command("purchase-return", { purchaseId: first.id, materialId: m.id, quantity: 2, date: today(), note: "Too much from lot A" }), /current stock/);
+  const count = s.command("stock-count", { materialId: m.id, binId: s.defaultBin().id, lotCode: "B-001", counted: 4, date: today() });
+  assert.equal(count.expected, 5);
+  assert.equal(count.lotCode, "B-001");
+  void second;
+});
 function fixture(t) {
   const s = new Store(":memory:");
   t.after(() => s.close());
