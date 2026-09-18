@@ -553,6 +553,18 @@ class Store {
     const actual = { material: actualMaterial, labour: actualLabour, overhead: 0, total: actualMaterial + actualLabour };
     return { estimated, actual, variance: { material: actual.material - estimated.material, labour: actual.labour - estimated.labour, overhead: actual.overhead - estimated.overhead, total: actual.total - estimated.total }, labourByDepartment: { estimated: estimatedByDepartment, actual: actualByDepartment }, labourBreakdown: { piece: pieceLabour, daily: dailyLabour, salary: salaryLabour, unallocated: dailyLabour + salaryLabour }, periodEnd: end };
   }
+  poMaterialUsage(po) {
+    return po.costSnapshot.lines.map((line) => {
+      const events = this.events(line.materialId).filter((event) => event.kind === "stock" && event.data.poId === po.id);
+      const issued = events.filter((event) => event.data.type === "issue").reduce((sum, event) => sum + Math.abs(event.data.quantity), 0);
+      const returned = events.filter((event) => event.data.type === "return").reduce((sum, event) => sum + Math.max(0, event.data.quantity), 0);
+      const scrap = events.filter((event) => event.data.type === "scrap").reduce((sum, event) => sum + Math.abs(event.data.quantity), 0);
+      const planned = round(line.quantity * po.quantity);
+      const netUsed = round(Math.max(0, issued - returned));
+      const wip = round(Math.max(0, netUsed - scrap));
+      return { materialId: line.materialId, materialName: line.name, unit: line.unit, planned, issued: round(issued), returned: round(returned), scrap: round(scrap), actual: netUsed, variance: round(netUsed - planned), wip, rate: line.rate, actualValue: Math.round(netUsed * line.rate), wipValue: Math.round(wip * line.rate) };
+    });
+  }
   snapshot() {
     return {
       ...Object.fromEntries(kinds.map((k) => [k, this.all(k)])),
@@ -569,6 +581,7 @@ class Store {
       poCosts: Object.fromEntries(
         this.all("po").map((p) => [p.id, this.poCosting(p)]),
       ),
+      poMaterialUsage: Object.fromEntries(this.all("po").map((p) => [p.id, this.poMaterialUsage(p)])),
       supplierBalances: Object.fromEntries(
         this.all("supplier").map((s) => [s.id, this.supplierBalance(s.id)]),
       ),
@@ -1176,13 +1189,13 @@ class Store {
       const material = this.get("material", p.materialId);
       check(active(material), "Inactive materials cannot be used in new stock movements.");
       check(
-        ["receive", "issue", "return", "adjust-up", "adjust-down"].includes(
+        ["receive", "issue", "return", "scrap", "adjust-up", "adjust-down"].includes(
           p.type,
         ),
         "Invalid stock movement.",
       );
       const qty = num(p.quantity, "Quantity", 0.000001),
-        quantity = ["issue", "adjust-down"].includes(p.type) ? -qty : qty;
+        quantity = ["issue", "scrap", "adjust-down"].includes(p.type) ? -qty : qty;
       const dtValue = dt();
       this.checkInventoryPeriodOpen(dtValue);
       const selectedReservation = p.reservationId ? this.get("reservation", p.reservationId) : null;
@@ -1210,6 +1223,9 @@ class Store {
       if (["issue", "return"].includes(p.type)) {
         poId = this.get("po", p.poId).id;
       }
+      if (p.type === "scrap") {
+        poId = this.get("po", p.poId).id;
+      }
       if (p.type === "return") {
         const issued = -this.events(p.materialId)
           .filter((e) => e.kind === "stock" && e.data.poId === poId)
@@ -1228,6 +1244,9 @@ class Store {
         }
         const reserved = this.reservedAtBin(material.id, bin.id, lot?.code || null, reservation?.id || null);
         check(qty <= this.stockAtBinLot(material.id, bin.id, dtValue, lot?.code || null) - reserved, "Not enough stock available; reserved stock must be issued against its reservation.");
+      }
+      if (p.type === "scrap") {
+        check(qty <= this.stockAtBinLot(material.id, bin.id, dtValue, lot?.code || null) - this.reservedAtBin(material.id, bin.id, lot?.code || null), "Not enough free stock to scrap; reserved stock is protected.");
       }
       const future = [
           ...this.events(p.materialId)

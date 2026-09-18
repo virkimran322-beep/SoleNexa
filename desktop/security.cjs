@@ -199,7 +199,7 @@ class Security {
       } : null;
       // Notes, other workers, cost sheets and factory balances never leave the backend.
       s.config={companyName:s.config.companyName,companyLogo:s.config.companyLogo,theme:'light',language:'en'};
-      for(const key of ['material','cost','po','poCosts','worker','assignment','department','events','warehouse','bin','lot','reservation','transfer','stock-count','inventory-close','supplier','purchase']) s[key]=[];
+      for(const key of ['material','cost','po','poCosts','poMaterialUsage','worker','assignment','department','events','warehouse','bin','lot','reservation','transfer','stock-count','inventory-close','supplier','purchase']) s[key]=[];
       delete s.inventoryValuation;
       s.balances={};s.stocks={};s.poStats={};
     }

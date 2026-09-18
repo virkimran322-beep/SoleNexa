@@ -1050,7 +1050,9 @@ function poCostPanel(p) {
   if (!c) return "";
   const departmentRows = Object.entries(c.labourByDepartment.estimated).map(([id,line]) => {const actual=c.labourByDepartment.actual[id]?.amount || 0; return [esc(line.name),money(line.amount),money(actual),money(actual-line.amount)];});
   const costRows = [["Material", money(c.estimated.material), money(c.actual.material), money(c.variance.material)], ["Labour", money(c.estimated.labour), money(c.actual.labour), money(c.variance.labour)], ["Overhead", money(c.estimated.overhead), money(c.actual.overhead), money(c.variance.overhead)], ["Total", money(c.estimated.total), money(c.actual.total), money(c.variance.total)], ...departmentRows].map((row) => `<tr>${row.map((value) => `<td>${value}</td>`).join("")}</tr>`);
-  return panel("Estimated vs actual costing", `<div class="panel-body"><p class="hint">Actual material uses saved PO rates. Actual labour includes accepted piece output. Factory-wide daily and salary wages in this period (${money(c.labourBreakdown.unallocated)}) are unallocated and excluded from this PO total. Actual overhead is not recorded yet; variance is provisional.</p><div class="table-wrap"><table><thead><tr><th>Component</th><th>Estimated</th><th>Actual</th><th>Variance</th></tr></thead><tbody>${costRows.join("")}</tbody></table></div></div>`);
+  const usage = state.poMaterialUsage?.[p.id] || [];
+  const usagePanel = panel("BOM consumption & WIP", `<div class="panel-body"><p class="hint">BOM quantities come from the PO snapshot. Issues, returns and scrap stay separate; WIP is the provisional material still issued to this PO after scrap.</p>${table(["Material","Planned","Issued","Returned","Scrap","Actual","WIP"], usage.map((line) => `<tr><td>${esc(line.materialName)}<small>${esc(line.unit)}</small></td><td>${qty(line.planned)}</td><td>${qty(line.issued)}</td><td>${qty(line.returned)}</td><td>${qty(line.scrap)}</td><td>${qty(line.actual)}</td><td>${qty(line.wip)} · ${money(line.wipValue)}</td></tr>`))}</div>`);
+  return panel("Estimated vs actual costing", `<div class="panel-body"><p class="hint">Actual material uses saved PO rates. Factory-wide daily and salary wages in this period (${money(c.labourBreakdown.unallocated)}) are unallocated and excluded from this PO total. Actual overhead is not recorded yet; variance is provisional.</p><div class="table-wrap"><table><thead><tr><th>Component</th><th>Estimated</th><th>Actual</th><th>Variance</th></tr></thead><tbody>${costRows.join("")}</tbody></table></div></div>`) + usagePanel;
 }
 function dashboardAlerts() {
   const overdue = state.po.filter((p) => state.poStats[p.id].finished < p.quantity && p.due < state.today);
@@ -1291,15 +1293,16 @@ function form(action, id) {
         ["receive", "Receive stock"],
         ["issue", "Issue to PO"],
         ["return", "Return from PO"],
+        ["scrap", "Scrap / production loss"],
         ["adjust-up", "Adjustment: increase"],
         ["adjust-down", "Adjustment: decrease"],
       ]) +
       number("quantity", "Quantity in material unit", 1, "0.000001", 0.000001) +
       dates() +
       poSelect().replace(" required", "") +
-      `<div id="supplier-receive-fields" class="full">${select("supplierId", "Supplier (for received stock)", [["", "No supplier / internal stock"], ...state.supplier.filter(active).map((s) => [s.id, s.name])]).replace(" required", "")}<p class="hint" id="supplier-receive-total">Choose a supplier to add the material value automatically to its payable account.</p></div>` +
+      `<div id="supplier-receive-fields" class="full">${select("supplierId", "Supplier (for received stock)", [["", "No supplier / internal stock"], ...state.supplier.filter(active).map((s) => [s.id, s.name])]).replace(" required", "")}<p class="hint" id="supplier-receive-total">Choose a supplier to add the material value automatically to its payable account.</p></div><p class="hint full" id="po-material-suggestion">Select an issue or scrap movement and PO to see the BOM suggestion.</p>` +
       note("Supplier / reference / reason") +
-      '<p class="hint full">PO is required for issues and returns. Lot / batch is optional for legacy or untracked stock, but once entered it keeps stock guards and history separate. For received stock, selecting a supplier automatically posts quantity × current material rate to that supplier account.</p>';
+      '<p class="hint full">PO is required for issues, returns and scrap. BOM suggestions use the PO cost-sheet snapshot; actual issue and scrap quantities remain separately auditable.</p>';
   }
   if (action === "warehouse") {
     title = "Add warehouse";
@@ -1456,6 +1459,19 @@ function updateForm() {
     }
     const noteField = $("[name=note]");
     if (noteField) noteField.required = receiving ? Boolean(supplier) : true;
+  }
+  const movementType = $("[name=type]")?.value;
+  const poField = $("[name=poId]");
+  if (poField && ["issue", "return", "scrap"].includes(movementType)) poField.required = true;
+  const suggestion = $("#po-material-suggestion");
+  if (suggestion && poField && $("[name=materialId]")) {
+    const po = find("po", poField.value), materialId = $("[name=materialId]").value;
+    const line = po?.costSnapshot?.lines?.find((item) => item.materialId === materialId);
+    const planned = line ? Number(line.quantity) * Number(po.quantity) : 0;
+    const usage = po && state.poMaterialUsage?.[po.id]?.find((item) => item.materialId === materialId);
+    suggestion.textContent = line && usage
+      ? `BOM suggestion: ${qty(planned)} ${line.unit} planned for this PO. Issued ${qty(usage.issued)}, returned ${qty(usage.returned)}, scrap ${qty(usage.scrap)}, net actual ${qty(usage.actual)}.`
+      : "Select an issue or scrap movement and PO to see the BOM suggestion.";
   }
   const assignmentRate = $("#assignment-rate-field");
   if (assignmentRate && $("[name=workerId]")) {

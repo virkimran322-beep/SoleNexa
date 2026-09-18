@@ -246,6 +246,21 @@ test("PO costing separates estimates, actual material and mixed labour variance"
   assert.equal(report.labourBreakdown.unallocated,3060000);
   assert.equal(report.variance.total, -838000);
 });
+test("PO material usage separates BOM plan, issues, returns, scrap and WIP", (t) => {
+  const { s, m, p } = fixture(t);
+  s.command("stock", { materialId: m.id, type: "receive", quantity: 30, note: "Raw stock" });
+  s.command("stock", { materialId: m.id, type: "issue", quantity: 20, poId: p.id, note: "Production issue" });
+  s.command("stock", { materialId: m.id, type: "scrap", quantity: 3, poId: p.id, note: "Cutting scrap" });
+  s.command("stock", { materialId: m.id, type: "return", quantity: 2, poId: p.id, note: "Unused return" });
+  const line = s.poMaterialUsage(p)[0];
+  assert.equal(line.planned, 50);
+  assert.equal(line.issued, 20);
+  assert.equal(line.returned, 2);
+  assert.equal(line.scrap, 3);
+  assert.equal(line.actual, 18);
+  assert.equal(line.wip, 15);
+  assert.equal(s.snapshot().poMaterialUsage[p.id][0].wip, 15);
+});
 test("master data revisions keep historical snapshots and record a readable history", (t) => {
   const { s, m, c, w, dep, p } = fixture(t);
   const a = s.command("assignment", { poId: p.id, workerId: w.id, departmentId: dep.id, unit: "pair", quantity: 10, rate: 20 });

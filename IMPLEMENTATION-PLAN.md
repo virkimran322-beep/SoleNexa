@@ -87,6 +87,7 @@ Offline Windows desktop software for a footwear factory with a Shopify store. Fa
 - [x] Offline warehouse transfers between active bins with atomic linked stock events, lot support and reserved-stock protection.
 - [x] Multi-line offline stock count sheets with duplicate-line guards, stale-stock checks and atomic approval adjustments.
 - [x] Offline inventory valuation policy with accountant approval, weighted-average/FIFO reports and closed-period backdate protection.
+- [x] Offline BOM suggestions on PO stock movements, planned-versus-actual material usage, provisional WIP and scrap tracking.
 - [ ] Accountant approval and implementation of the final inventory valuation method (weighted average, FIFO or another approved policy).
 - [x] Structured size/colour PO breakdown with exact pair-total validation; legacy POs remain compatible.
 - [x] Independent finished-stock and dispatch bins for new PO size/colour variants; legacy PO-level stock remains compatible.
